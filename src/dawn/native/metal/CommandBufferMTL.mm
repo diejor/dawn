@@ -159,7 +159,7 @@ NSRef<MTLComputePassDescriptor> CreateMTLComputePassDescriptor(BeginComputePassC
     MTLComputePassDescriptor* descriptor = descriptorRef.Get();
     // MTLDispatchTypeSerial is the same dispatch type as the deafult MTLComputeCommandEncoder.
     // MTLDispatchTypeConcurrent requires memory barriers to ensure multiple commands synchronize
-    // access to the same resources, which we may support it later.
+    // access to the same resources, which we may support it later. See crbug.com/425987598
     descriptor.dispatchType = MTLDispatchTypeSerial;
 
     SetSampleBufferAttachments(descriptor, computePass);
@@ -175,7 +175,7 @@ NSRef<MTLRenderPassDescriptor> CreateMTLRenderPassDescriptor(
     NSRef<MTLRenderPassDescriptor> descriptorRef = [MTLRenderPassDescriptor renderPassDescriptor];
     MTLRenderPassDescriptor* descriptor = descriptorRef.Get();
 
-    for (auto attachment : IterateBitSet(renderPass->attachmentState->GetColorAttachmentsMask())) {
+    for (auto attachment : renderPass->attachmentState->GetColorAttachmentsMask()) {
         uint8_t i = static_cast<uint8_t>(attachment);
         auto& attachmentInfo = renderPass->colorAttachments[attachment];
 
@@ -524,8 +524,8 @@ class BindGroupTracker : public BindGroupTrackerBase<true, uint64_t> {
     template <typename Encoder>
     void Apply(Encoder encoder) {
         BeforeApply();
-        for (BindGroupIndex index : IterateBitSet(mDirtyBindGroupsObjectChangedOrIsDynamic)) {
-            ApplyBindGroup(encoder, index, ToBackend(mBindGroups[index]), mDynamicOffsets[index],
+        for (BindGroupIndex index : mDirtyBindGroupsObjectChangedOrIsDynamic) {
+            ApplyBindGroup(encoder, index, ToBackend(mBindGroups[index]), GetDynamicOffsets(index),
                            ToBackend(mPipelineLayout));
         }
         AfterApply();
@@ -540,7 +540,7 @@ class BindGroupTracker : public BindGroupTrackerBase<true, uint64_t> {
                             id<MTLComputeCommandEncoder> compute,
                             BindGroupIndex index,
                             BindGroup* group,
-                            const ityp::vector<BindingIndex, uint64_t>& dynamicOffsets,
+                            const ityp::span<BindingIndex, uint64_t>& dynamicOffsets,
                             PipelineLayout* pipelineLayout) {
         // TODO(crbug.com/dawn/854): Maintain buffers and offsets arrays in BindGroup
         // so that we only have to do one setVertexBuffers and one setFragmentBuffers
@@ -715,7 +715,7 @@ class VertexBufferTracker {
                bool enableVertexPulling) {
         const auto& vertexBuffersToApply = mDirtyVertexBuffers & pipeline->GetVertexBuffersUsed();
 
-        for (VertexBufferSlot slot : IterateBitSet(vertexBuffersToApply)) {
+        for (VertexBufferSlot slot : vertexBuffersToApply) {
             uint32_t metalIndex = pipeline->GetMtlVertexBufferIndex(slot);
 
             if (enableVertexPulling) {

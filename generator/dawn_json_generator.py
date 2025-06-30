@@ -56,6 +56,9 @@ class Name:
         else:
             self.chunks = name.split(' ')
 
+    def __lt__(self, other):
+        return self.get() < other.get()
+
     def get(self):
         return self.name
 
@@ -106,6 +109,9 @@ class Type:
         self.name = Name(name, native=native)
         self.category = json_data['category']
         self.is_wire_transparent = False
+
+    def __lt__(self, other):
+        return self.name < other.name
 
 
 EnumValue = namedtuple('EnumValue', ['name', 'value', 'valid', 'json_data'])
@@ -375,8 +381,8 @@ class StructureType(Record, Type):
     # Returns True if the structure can be created with no parameters, e.g. all of its members have
     # defaults or are optional,
     def has_basic_constructor(self):
-        return all((member.optional or member.default_value)
-                   for member in self.members)
+        return all((member.optional or member.default_value
+                    or member.type.hasUndefined) for member in self.members)
 
 
 class CallbackInfoType(StructureType):
@@ -468,8 +474,7 @@ def link_object(obj, types):
                       autolock_enabled, json_data)
 
     obj.methods = [make_method(m) for m in obj.json_data.get('methods', [])]
-    obj.methods.sort(key=lambda method: method.name.canonical_case())
-
+    obj.methods.sort(key=lambda method: method.name.concatcase().lower())
 
 def link_structure(struct, types):
     struct.members = linked_record_members(struct.json_data['members'], types)
@@ -513,6 +518,11 @@ def topo_sort_structure(structs):
     for struct in structs:
         struct.visited = False
         struct.subdag_depth = 0
+        # String view is special cased to -1 because we purposely fully declare
+        # it before all other structs.
+        if struct.name.get() == "string view":
+            struct.subdag_depth = -1
+            struct.visited = True
 
     def compute_depth(struct):
         if struct.visited:
@@ -581,23 +591,6 @@ def parse_json(json, enabled_tags, disabled_tags=None):
     for struct in by_category['structure']:
         link_structure(struct, types)
 
-        if struct.has_free_members_function:
-            name = struct.name.get() + " free members"
-            func_decl = FunctionDeclaration(
-                True,
-                name, {
-                    "returns":
-                    "void",
-                    "args": [{
-                        "name": "value",
-                        "type": struct.name.get(),
-                        "annotation": "value",
-                    }]
-                },
-                no_cpp=True)
-            types[name] = func_decl
-            by_category['function'].append(func_decl)
-
     for callback_info in by_category['callback info']:
         link_structure(callback_info, types)
 
@@ -618,7 +611,8 @@ def parse_json(json, enabled_tags, disabled_tags=None):
 
     for category in by_category.keys():
         by_category[category] = sorted(
-            by_category[category], key=lambda typ: typ.name.canonical_case())
+            by_category[category],
+            key=lambda typ: typ.name.concatcase().lower())
 
     by_category['structure'] = topo_sort_structure(by_category['structure'])
 
@@ -638,6 +632,8 @@ def parse_json(json, enabled_tags, disabled_tags=None):
         'enabled_tags': enabled_tags,
         'disabled_tags': disabled_tags,
         'c_methods': lambda typ: c_methods(api_params, typ),
+        'c_methods_sorted_by_parent':
+        get_c_methods_sorted_by_parent(api_params),
         'c_methods_sorted_by_name': get_c_methods_sorted_by_name(api_params),
     }
 
@@ -660,6 +656,12 @@ def compute_wire_params(api_params, wire_json):
 
     # Generate commands from object methods
     for api_object in wire_params['by_category']['object']:
+        # Reference counting functions are generated separately, so label them as "handwritten".
+        wire_json['special items']['client_handwritten_commands'] += [
+            api_object.name.CamelCase() + 'AddRef',
+            api_object.name.CamelCase() + 'Release'
+        ]
+
         for method in api_object.methods:
             command_name = concat_names(api_object.name, method.name)
             command_suffix = Name(command_name).CamelCase()
@@ -699,6 +701,12 @@ def compute_wire_params(api_params, wire_json):
             command.derived_object = api_object
             command.derived_method = method
             commands.append(command)
+
+    # Generate commands from structure methods. Notes that currently this is only FreeMembers.
+    for api_struct in wire_params['by_category']['structure']:
+        wire_json['special items']['client_handwritten_commands'] += [
+            api_struct.name.CamelCase() + 'FreeMembers'
+        ]
 
     for (name, json_data) in wire_json['commands'].items():
         commands.append(Command(name, linked_record_members(json_data, types)))
@@ -789,21 +797,11 @@ def compute_kotlin_params(loaded_json, kotlin_json):
     def jni_name(type):
         return kt_file_path + '/' + type.name.CamelCase()
 
-    # We assume that if the final two parameters are named 'userdata' and 'callback' respectively
-    # that this is an async method that uses function pointer based callbacks.
-    def is_async_method(method):
-        if len(method.arguments) < 2:
-            return False  # Not enough parameters to be an async method.
-        if method.arguments[-1].name.get() != 'userdata':
-            return False
-        if method.arguments[-2].name.get() != 'callback':
-            return False
-        return True
-
     # A structure may need to know which other structures listed it as a chain root, e.g.
     # to know whether to mark the generated class 'open'.
     chain_children = defaultdict(list)
-    for structure in params_kotlin['by_category']['structure']:
+    by_category = params_kotlin['by_category']
+    for structure in by_category['structure']:
         for chain_root in structure.chain_roots:
             chain_children[chain_root.name.get()].append(structure)
     params_kotlin['chain_children'] = chain_children
@@ -812,7 +810,14 @@ def compute_kotlin_params(loaded_json, kotlin_json):
     params_kotlin['include_structure'] = include_structure
     params_kotlin['kotlin_record_members'] = kotlin_record_members
     params_kotlin['jni_name'] = jni_name
-    params_kotlin['is_async_method'] = is_async_method
+    params_kotlin['has_kotlin_classes'] = (
+        by_category['callback function'] + by_category['callback info'] +
+        by_category['enum'] + by_category['function pointer'] +
+        by_category['object'] + [
+            structure for structure in by_category['structure']
+            if include_structure(structure)
+        ])
+
     return params_kotlin
 
 
@@ -981,15 +986,33 @@ def as_wireType(metadata, typ):
 
 
 def c_methods(params, typ):
-    return typ.methods + [
-        Method(Name('add ref'), params['types']['void'], [], False, {}),
-        Method(Name('release'), params['types']['void'], [], False, {}),
-    ]
+    if typ.category == 'object':
+        return typ.methods + [
+            Method(Name('add ref'), params['types']['void'], [], False, {}),
+            Method(Name('release'), params['types']['void'], [], False, {}),
+        ]
+    elif typ.category == 'structure':
+        if typ.has_free_members_function:
+            return [
+                Method(Name('free members'), params['types']['void'], [],
+                       False, {})
+            ]
+        return []
+    else:
+        assert False, "c_methods only valid on objects and structure"
+
+
+def get_c_methods_sorted_by_parent(api_params):
+    return sorted([(typ, c_methods(api_params, typ))
+                   for typ in (api_params['by_category']['object'] +
+                               api_params['by_category']['structure'])
+                   if len(c_methods(api_params, typ)) > 0])
+
 
 def get_c_methods_sorted_by_name(api_params):
     unsorted = [(as_MethodSuffix(typ.name, method.name), typ, method) \
-            for typ in api_params['by_category']['object'] \
-            for method in c_methods(api_params, typ) ]
+    for (typ, methods) in get_c_methods_sorted_by_parent(api_params) \
+    for method in methods]
     return [(typ, method) for (_, typ, method) in sorted(unsorted)]
 
 
@@ -1224,10 +1247,9 @@ class MultiGeneratorFromDawnJSON(Generator):
                            [RENDER_PARAMS_BASE, params_dawn]))
 
         if 'webgpu_headers' in targets:
-            params_upstream = parse_json(
-                loaded_json,
-                enabled_tags=['compat', 'upstream', 'native'],
-                disabled_tags=['dawn'])
+            params_upstream = parse_json(loaded_json,
+                                         enabled_tags=['upstream', 'native'],
+                                         disabled_tags=['dawn'])
             imported_templates.append('BSD_LICENSE')
             renders.append(
                 FileRender('api.h', 'webgpu-headers/' + api + '.h',
@@ -1281,6 +1303,15 @@ class MultiGeneratorFromDawnJSON(Generator):
                     'emdawnwebgpu/library_webgpu_generated_sig_info.js',
                     'src/emdawnwebgpu/library_webgpu_generated_sig_info.js',
                     [RENDER_PARAMS_BASE, params_emscripten]))
+
+        if 'emdawnwebgpu_link_test_cpp' in targets:
+            assert api == 'webgpu'
+            params_emscripten = parse_json(
+                loaded_json, enabled_tags=['compat', 'emscripten'])
+            renders.append(
+                FileRender('emdawnwebgpu/LinkTest.cpp',
+                           'src/emdawnwebgpu/LinkTest.cpp',
+                           [RENDER_PARAMS_BASE, params_emscripten]))
 
         if 'mock_api' in targets:
             mock_params = [
@@ -1374,6 +1405,20 @@ class MultiGeneratorFromDawnJSON(Generator):
                 FileRender('dawn/native/ObjectType.cpp',
                            'src/' + native_dir + '/ObjectType_autogen.cpp',
                            frontend_params))
+
+        if 'dawn_utils' in targets:
+            # Generate ComboLimits without any extensions so it works on
+            # all targets (and doesn't chain any experimental stuff like
+            # extensions that are output only and produce warnings on input).
+            params = parse_json(loaded_json, enabled_tags=['compat'])
+            renders.append(
+                FileRender('dawn/utils/ComboLimits.h',
+                           'src/dawn/utils/ComboLimits.h',
+                           [RENDER_PARAMS_BASE, params]))
+            renders.append(
+                FileRender('dawn/utils/ComboLimits.cpp',
+                           'src/dawn/utils/ComboLimits.cpp',
+                           [RENDER_PARAMS_BASE, params]))
 
         if 'wire' in targets:
             params_dawn_wire = parse_json(
@@ -1521,7 +1566,12 @@ class MultiGeneratorFromDawnJSON(Generator):
             renders.append(
                 FileRender('art/methods.cpp', 'cpp/methods.cpp',
                            [RENDER_PARAMS_BASE, params_kotlin]))
-
+            renders.append(
+                FileRender('art/JNIClasses.h', 'cpp/JNIClasses.h',
+                           [RENDER_PARAMS_BASE, params_kotlin]))
+            renders.append(
+                FileRender('art/JNIClasses.cpp', 'cpp/JNIClasses.cpp',
+                           [RENDER_PARAMS_BASE, params_kotlin]))
         return GeneratorOutput(renders=renders,
                                imported_templates=imported_templates)
 

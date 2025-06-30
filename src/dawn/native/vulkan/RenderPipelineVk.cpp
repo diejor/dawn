@@ -370,7 +370,6 @@ MaybeError RenderPipeline::InitializeImpl() {
 
     // There are at most 2 shader stages in render pipeline, i.e. vertex and fragment
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
-    std::array<std::string, 2> shaderStageEntryPoints;
     uint32_t stageCount = 0;
 
     auto AddShaderStage = [&](SingleShaderStage stage, VkShaderStageFlagBits vkStage,
@@ -383,7 +382,7 @@ MaybeError RenderPipeline::InitializeImpl() {
         mHasInputAttachment = mHasInputAttachment || moduleAndSpirv.hasInputAttachment;
         if (buildCacheKey) {
             // Record cache key for each shader since it will become inaccessible later on.
-            StreamIn(&mCacheKey, stream::Iterable(moduleAndSpirv.spirv, moduleAndSpirv.wordCount));
+            StreamIn(&mCacheKey, moduleAndSpirv.spirv);
         }
 
         VkPipelineShaderStageCreateInfo* shaderStage = &shaderStages[stageCount];
@@ -393,8 +392,8 @@ MaybeError RenderPipeline::InitializeImpl() {
         shaderStage->flags = 0;
         shaderStage->pSpecializationInfo = nullptr;
         shaderStage->stage = vkStage;
-        shaderStageEntryPoints[stageCount] = kRemappedEntryPointName;
-        shaderStage->pName = shaderStageEntryPoints[stageCount].c_str();
+        // string_view returned by GetIsolatedEntryPointName() points to a null-terminated string.
+        shaderStage->pName = device->GetIsolatedEntryPointName().data();
 
         stageCount++;
         return {};
@@ -500,7 +499,7 @@ MaybeError RenderPipeline::InitializeImpl() {
             GetStage(SingleShaderStage::Fragment).metadata->fragmentOutputMask;
         auto highestColorAttachmentIndexPlusOne =
             GetHighestBitIndexPlusOne(GetColorAttachmentsMask());
-        for (auto i : IterateBitSet(GetColorAttachmentsMask())) {
+        for (auto i : GetColorAttachmentsMask()) {
             const ColorTargetState* target = GetColorTargetState(i);
             colorBlendAttachments[i] = ComputeColorDesc(target, fragmentOutputMask[i]);
         }
@@ -547,7 +546,7 @@ MaybeError RenderPipeline::InitializeImpl() {
         ColorAttachmentMask expandResolveMask =
             GetAttachmentState()->GetExpandResolveInfo().attachmentsToExpandResolve;
 
-        for (auto i : IterateBitSet(GetColorAttachmentsMask())) {
+        for (auto i : GetColorAttachmentsMask()) {
             wgpu::LoadOp colorLoadOp = wgpu::LoadOp::Load;
             bool hasResolveTarget = resolveMask.test(i);
 
@@ -613,24 +612,20 @@ MaybeError RenderPipeline::InitializeImpl() {
     // Try to see if we have anything in the blob cache.
     platform::metrics::DawnHistogramTimer cacheTimer(GetDevice()->GetPlatform());
     Ref<PipelineCache> cache = ToBackend(GetDevice()->GetOrCreatePipelineCache(GetCacheKey()));
-    if (cache->CacheHit()) {
-        DAWN_TRY(CheckVkSuccess(
-            device->fn.CreateGraphicsPipelines(device->GetVkDevice(), cache->GetHandle(), 1,
-                                               &createInfo, nullptr, &*mHandle),
-            "CreateGraphicsPipelines"));
-        cacheTimer.RecordMicroseconds("Vulkan.CreateGraphicsPipelines.CacheHit");
-    } else {
-        cacheTimer.Reset();
-        DAWN_TRY(CheckVkSuccess(
-            device->fn.CreateGraphicsPipelines(device->GetVkDevice(), cache->GetHandle(), 1,
-                                               &createInfo, nullptr, &*mHandle),
-            "CreateGraphicsPipelines"));
-        cacheTimer.RecordMicroseconds("Vulkan.CreateGraphicsPipelines.CacheMiss");
-    }
+    DAWN_TRY(
+        CheckVkSuccess(device->fn.CreateGraphicsPipelines(device->GetVkDevice(), cache->GetHandle(),
+                                                          1, &createInfo, nullptr, &*mHandle),
+                       "CreateGraphicsPipelines"));
+    cacheTimer.RecordMicroseconds(cache->CacheHit() ? "Vulkan.CreateGraphicsPipelines.CacheHit"
+                                                    : "Vulkan.CreateGraphicsPipelines.CacheMiss");
 
     DAWN_TRY(cache->DidCompilePipeline());
 
     SetLabelImpl();
+
+    for (uint32_t i = 0; i < stageCount; ++i) {
+        device->fn.DestroyShaderModule(device->GetVkDevice(), shaderStages[i].module, nullptr);
+    }
 
     return {};
 }
@@ -643,7 +638,7 @@ VkPipelineVertexInputStateCreateInfo RenderPipeline::ComputeVertexInputDesc(
     PipelineVertexInputStateCreateInfoTemporaryAllocations* tempAllocations) {
     // Fill in the "binding info" that will be chained in the create info
     uint32_t bindingCount = 0;
-    for (VertexBufferSlot slot : IterateBitSet(GetVertexBuffersUsed())) {
+    for (VertexBufferSlot slot : GetVertexBuffersUsed()) {
         const VertexBufferInfo& bindingInfo = GetVertexBuffer(slot);
 
         VkVertexInputBindingDescription* bindingDesc = &tempAllocations->bindings[bindingCount];
@@ -656,7 +651,7 @@ VkPipelineVertexInputStateCreateInfo RenderPipeline::ComputeVertexInputDesc(
 
     // Fill in the "attribute info" that will be chained in the create info
     uint32_t attributeCount = 0;
-    for (VertexAttributeLocation loc : IterateBitSet(GetAttributeLocationsUsed())) {
+    for (VertexAttributeLocation loc : GetAttributeLocationsUsed()) {
         const VertexAttributeInfo& attributeInfo = GetAttribute(loc);
 
         VkVertexInputAttributeDescription* attributeDesc =

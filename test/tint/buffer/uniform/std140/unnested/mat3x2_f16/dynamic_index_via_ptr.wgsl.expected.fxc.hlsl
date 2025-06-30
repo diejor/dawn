@@ -1,34 +1,40 @@
 SKIP: INVALID
 
+
 cbuffer cbuffer_m : register(b0) {
   uint4 m[1];
 };
-static int counter = 0;
-
+static int counter = int(0);
 int i() {
-  counter = (counter + 1);
+  counter = (counter + int(1));
   return counter;
 }
 
-matrix<float16_t, 3, 2> m_load(uint offset) {
-  const uint scalar_offset = ((offset + 0u)) / 4;
-  uint ubo_load = m[scalar_offset / 4][scalar_offset % 4];
-  const uint scalar_offset_1 = ((offset + 4u)) / 4;
-  uint ubo_load_1 = m[scalar_offset_1 / 4][scalar_offset_1 % 4];
-  const uint scalar_offset_2 = ((offset + 8u)) / 4;
-  uint ubo_load_2 = m[scalar_offset_2 / 4][scalar_offset_2 % 4];
-  return matrix<float16_t, 3, 2>(vector<float16_t, 2>(float16_t(f16tof32(ubo_load & 0xFFFF)), float16_t(f16tof32(ubo_load >> 16))), vector<float16_t, 2>(float16_t(f16tof32(ubo_load_1 & 0xFFFF)), float16_t(f16tof32(ubo_load_1 >> 16))), vector<float16_t, 2>(float16_t(f16tof32(ubo_load_2 & 0xFFFF)), float16_t(f16tof32(ubo_load_2 >> 16))));
+vector<float16_t, 2> tint_bitcast_to_f16(uint src) {
+  uint v = src;
+  float t_low = f16tof32((v & 65535u));
+  float t_high = f16tof32(((v >> 16u) & 65535u));
+  float16_t v_1 = float16_t(t_low);
+  return vector<float16_t, 2>(v_1, float16_t(t_high));
+}
+
+matrix<float16_t, 3, 2> v_2(uint start_byte_offset) {
+  uint4 v_3 = m[(start_byte_offset / 16u)];
+  vector<float16_t, 2> v_4 = tint_bitcast_to_f16((((((start_byte_offset % 16u) / 4u) == 2u)) ? (v_3.z) : (v_3.x)));
+  uint4 v_5 = m[((4u + start_byte_offset) / 16u)];
+  vector<float16_t, 2> v_6 = tint_bitcast_to_f16(((((((4u + start_byte_offset) % 16u) / 4u) == 2u)) ? (v_5.z) : (v_5.x)));
+  uint4 v_7 = m[((8u + start_byte_offset) / 16u)];
+  return matrix<float16_t, 3, 2>(v_4, v_6, tint_bitcast_to_f16(((((((8u + start_byte_offset) % 16u) / 4u) == 2u)) ? (v_7.z) : (v_7.x))));
 }
 
 [numthreads(1, 1, 1)]
 void f() {
-  int p_m_i_save = i();
-  matrix<float16_t, 3, 2> l_m = m_load(0u);
-  const uint scalar_offset_3 = ((4u * uint(p_m_i_save))) / 4;
-  uint ubo_load_3 = m[scalar_offset_3 / 4][scalar_offset_3 % 4];
-  vector<float16_t, 2> l_m_i = vector<float16_t, 2>(float16_t(f16tof32(ubo_load_3 & 0xFFFF)), float16_t(f16tof32(ubo_load_3 >> 16)));
-  return;
+  uint v_8 = (4u * uint(i()));
+  matrix<float16_t, 3, 2> l_m = v_2(0u);
+  uint4 v_9 = m[(v_8 / 16u)];
+  vector<float16_t, 2> l_m_i = tint_bitcast_to_f16((((((v_8 % 16u) / 4u) == 2u)) ? (v_9.z) : (v_9.x)));
 }
+
 FXC validation failure:
 <scrubbed_path>(11,8-16): error X3000: syntax error: unexpected token 'float16_t'
 

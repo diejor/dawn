@@ -35,9 +35,9 @@
 
 #include "src/tint/lang/core/evaluation_stage.h"
 #include "src/tint/lang/core/type/input_attachment.h"
+#include "src/tint/lang/wgsl/allowed_features.h"
 #include "src/tint/lang/wgsl/ast/input_attachment_index_attribute.h"
 #include "src/tint/lang/wgsl/ast/pipeline_stage.h"
-#include "src/tint/lang/wgsl/common/allowed_features.h"
 #include "src/tint/lang/wgsl/program/program_builder.h"
 #include "src/tint/lang/wgsl/resolver/sem_helper.h"
 #include "src/tint/utils/containers/hashmap.h"
@@ -163,16 +163,8 @@ class Validator {
     bool IsPlain(const core::type::Type* type) const;
 
     /// @param type the given type
-    /// @returns true if the given type is a fixed-footprint type
-    bool IsFixedFootprint(const core::type::Type* type) const;
-
-    /// @param type the given type
     /// @returns true if the given type is storable
     bool IsStorable(const core::type::Type* type) const;
-
-    /// @param type the given type
-    /// @returns true if the given type is host-shareable
-    bool IsHostShareable(const core::type::Type* type) const;
 
     /// Validates the enabled extensions
     /// @param enables the extension enables
@@ -558,11 +550,6 @@ class Validator {
     /// @returns true on success, false otherwise
     bool TextureBuiltinFn(const sem::Call* call) const;
 
-    /// Validates a workgroupUniformLoad builtin function
-    /// @param call the builtin call to validate
-    /// @returns true on success, false otherwise
-    bool WorkgroupUniformLoad(const sem::Call* call) const;
-
     /// Validates a subgroupBroadcast builtin function
     /// @param call the builtin call to validate
     /// @returns true on success, false otherwise
@@ -582,6 +569,18 @@ class Validator {
     /// @param source the source of the f16 usage
     /// @returns true on success, false otherwise
     bool CheckF16Enabled(const Source& source) const;
+
+    /// Validates that 'chromium_experimental_subgroup_matrix' extension is enabled for i8 usage at
+    /// @p source
+    /// @param source the source of the i8 usage
+    /// @returns true on success, false otherwise
+    bool CheckI8Enabled(const Source& source) const;
+
+    /// Validates that 'chromium_experimental_subgroup_matrix' extension is enabled for u8 usage at
+    /// @p source
+    /// @param source the source of the u8 usage
+    /// @returns true on success, false otherwise
+    bool CheckU8Enabled(const Source& source) const;
 
     /// Validates there are no duplicate attributes
     /// @param attributes the list of attributes to validate
@@ -663,7 +662,6 @@ class Validator {
     bool CheckTypeAccessAddressSpace(const core::type::Type* store_ty,
                                      core::Access access,
                                      core::AddressSpace address_space,
-                                     VectorRef<const tint::ast::Attribute*> attributes,
                                      const Source& source) const;
 
     /// Raises an error if the entry_point @p entry_point uses two or more module-scope 'var's with

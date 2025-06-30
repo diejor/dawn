@@ -48,10 +48,6 @@
 #include "src/tint/lang/core/ir/var.h"
 #include "src/tint/lang/msl/ir/transform/flatten_bindings.h"
 #include "src/tint/lang/wgsl/ast/module.h"
-#include "src/tint/lang/wgsl/ast/transform/manager.h"
-#include "src/tint/lang/wgsl/ast/transform/renamer.h"
-#include "src/tint/lang/wgsl/ast/transform/single_entry_point.h"
-#include "src/tint/lang/wgsl/ast/transform/substitute_override.h"
 #include "src/tint/utils/command/cli.h"
 #include "src/tint/utils/command/command.h"
 #include "src/tint/utils/containers/transform.h"
@@ -117,6 +113,11 @@ enum class Format : uint8_t {
     kIr,
 };
 
+enum class ExeMode : uint8_t {
+    kStandalone,
+    kServer,
+};
+
 #if TINT_BUILD_HLSL_WRITER
 constexpr uint32_t kMinShaderModelForDXC = 60u;
 constexpr uint32_t kMaxSupportedShaderModelForDXC = 66u;
@@ -150,7 +151,6 @@ struct Options {
     bool enable_robustness = true;
 
     bool dump_ir = false;
-    bool use_ir = false;
     bool use_ir_reader = false;
 
 #if TINT_BUILD_SYNTAX_TREE_WRITER
@@ -163,10 +163,12 @@ struct Options {
 
 #if TINT_BUILD_SPV_WRITER
     bool use_storage_input_output_16 = true;
+    tint::spirv::writer::SpvVersion spirv_version = tint::spirv::writer::SpvVersion::kSpv13;
 #endif  // TINT_BULD_SPV_WRITER
 
 #if TINT_BUILD_MSL_WRITER
     std::string xcrun_path;
+    bool use_argument_buffers = false;
     std::unordered_map<uint32_t, uint32_t> pixel_local_attachments;
 #endif
 
@@ -221,7 +223,7 @@ Format InferFormat(const std::string& filename) {
 // The actual warning occurs on `std::from_chars(hash.data(), hash.data() + hash.size(), value,
 // base);`, but disabling/enabling warnings cannot be done within function scope
 TINT_BEGIN_DISABLE_WARNING(UNSAFE_BUFFER_USAGE);
-bool ParseArgs(tint::VectorRef<std::string_view> arguments, Options* opts) {
+bool ParseArgs(tint::VectorRef<std::string_view> arguments, Options* opts, ExeMode exe_mode) {
     using namespace tint::cli;  // NOLINT(build/namespaces)
 
     tint::Vector<EnumName<Format>, 8> format_enum_names{
@@ -266,14 +268,16 @@ If not provided, will be inferred from output filename extension:
                                                 format_enum_names, ShortName{"f"});
     TINT_DEFER(opts->format = fmt.value.value_or(Format::kUnknown));
 
-    auto& col = options.Add<EnumOption<tint::ColorMode>>(
-        "color", "Use colored output",
-        tint::Vector{
-            EnumName{tint::ColorMode::kPlain, "off"},
-            EnumName{tint::ColorMode::kDark, "dark"},
-            EnumName{tint::ColorMode::kLight, "light"},
-        },
-        ShortName{"col"}, Default{tint::ColorModeDefault()});
+    const auto default_color_mode =
+        exe_mode == ExeMode::kServer ? tint::ColorMode::kPlain : tint::ColorModeDefault();
+    auto& col =
+        options.Add<EnumOption<tint::ColorMode>>("color", "Use colored output",
+                                                 tint::Vector{
+                                                     EnumName{tint::ColorMode::kPlain, "off"},
+                                                     EnumName{tint::ColorMode::kDark, "dark"},
+                                                     EnumName{tint::ColorMode::kLight, "light"},
+                                                 },
+                                                 ShortName{"col"}, Default{default_color_mode});
     TINT_DEFER(opts->printer = CreatePrinter(*col.value));
 
     auto& ep = options.Add<StringOption>("entry-point", "Output single entry point",
@@ -288,10 +292,6 @@ If not provided, will be inferred from output filename extension:
     auto& output = options.Add<StringOption>("output-name", "Output file name", ShortName{"o"},
                                              Parameter{"name"});
     TINT_DEFER(opts->output_file = output.value.value_or(""));
-
-    auto& use_ir = options.Add<BoolOption>(
-        "use-ir", "Use the IR for writers and transforms when possible", Default{false});
-    TINT_DEFER(opts->use_ir = *use_ir.value);
 
     auto& use_ir_reader = options.Add<BoolOption>(
         "use-ir-reader", "Use the IR for the SPIR-V reader", Default{false});
@@ -386,6 +386,15 @@ violations that may be produced)",
             opts->spirv_reader_options.allow_non_uniform_derivatives = true;
         }
     });
+
+    auto& sampler_mapping = options.Add<StringOption>(
+        "sampler-mapping",
+        "Allows remapping the binding points of samplers from the SPIR-V file. "
+        "This allows setting a correct binding point for samplers which were part of a combined "
+        "texture/sampler pair. Entries are provided as binding point pairs (group, binding) and "
+        "each provides a (source:destination) mapping. (e.g. 1,2:3,4) Multiple entries should "
+        "be separated with a space.",
+        Default{""});
 #endif
 
 #if TINT_BUILD_SPV_WRITER
@@ -393,6 +402,16 @@ violations that may be produced)",
         options.Add<BoolOption>("use-storage-input-output-16",
                                 "Use the StorageInputOutput16 SPIR-V capability", Default{true});
     TINT_DEFER(opts->use_storage_input_output_16 = *use_storage_input_output_16.value);
+
+    tint::Vector<EnumName<tint::spirv::writer::SpvVersion>, 2> version_enum_names{
+        EnumName(tint::spirv::writer::SpvVersion::kSpv13, "1.3"),
+        EnumName(tint::spirv::writer::SpvVersion::kSpv14, "1.4"),
+    };
+    auto& spirv_version = options.Add<EnumOption<tint::spirv::writer::SpvVersion>>(
+        "spirv-version", R"(Specify the SPIR-V binary version.
+Valid values are 1.3 and 1.4)",
+        version_enum_names, Default{tint::spirv::writer::SpvVersion::kSpv13});
+    TINT_DEFER(opts->spirv_version = *spirv_version.value);
 #endif  // TINT_BUILD_SPV_WRITER
 
 #if TINT_BUILD_GLSL_WRITER
@@ -415,6 +434,10 @@ When specified, automatically enables MSL validation)",
             opts->validate = true;
         }
     });
+
+    auto& use_argument_buffers = options.Add<BoolOption>(
+        "use-argument-buffers", "Use the Argument Buffers in MSL", Default{false});
+    TINT_DEFER(opts->use_argument_buffers = *use_argument_buffers.value);
 #endif  // TINT_BUILD_MSL_WRITER
 
 #if TINT_BUILD_HLSL_WRITER
@@ -494,6 +517,49 @@ Options:
             opts->overrides.Add(std::string(parts[0]), value.Get());
         }
     }
+
+#if TINT_BUILD_SPV_READER
+    if (!sampler_mapping.value->empty()) {
+        auto str_to_bp = [](const std::string_view& str) -> std::optional<tint::BindingPoint> {
+            auto parts = tint::Split(str, ",");
+            if (parts.Length() != 2) {
+                std::cerr << "A binding point requires a 'group,binding' pair, found "
+                          << parts.Length() << " components instead of 2.\n";
+                return std::nullopt;
+            }
+
+            uint32_t group = 0;
+            std::from_chars(parts[0].data(), parts[0].data() + parts[0].size(), group);
+
+            uint32_t binding = 0;
+            std::from_chars(parts[1].data(), parts[1].data() + parts[0].size(), binding);
+
+            return {tint::BindingPoint{group, binding}};
+        };
+
+        for (auto mapping : tint::Split(*sampler_mapping.value, " ")) {
+            auto parts = tint::Split(mapping, ":");
+            if (parts.Length() != 2) {
+                std::cerr << "Expected source and destination binding points separated by a ':'\n";
+                return false;
+            }
+
+            auto opt_src = str_to_bp(parts[0]);
+            if (!opt_src.has_value()) {
+                return false;
+            }
+            tint::BindingPoint src_bp = opt_src.value();
+
+            auto opt_dst = str_to_bp(parts[1]);
+            if (!opt_dst.has_value()) {
+                return false;
+            }
+            tint::BindingPoint dst_bp = opt_dst.value();
+
+            opts->spirv_reader_options.sampler_mappings.insert({src_bp, dst_bp});
+        }
+    }
+#endif  // TINT_BUILD_SPV_READER
 
 #if TINT_BUILD_HLSL_WRITER
     if (pixel_local_attachment_formats.value.has_value()) {
@@ -609,55 +675,12 @@ Options:
 }
 TINT_END_DISABLE_WARNING(UNSAFE_BUFFER_USAGE);
 
-[[maybe_unused]] void AddRenamer(Options& options,
-                                 tint::ast::transform::Manager& transform_manager,
-                                 tint::ast::transform::DataMap& transform_inputs) {
-    switch (options.format) {
-        case Format::kMsl: {
-            // Renaming is handled in the backend.
-            break;
-        }
-        case Format::kGlsl: {
-            // Renaming is handled in the backend.
-            break;
-        }
-        case Format::kHlsl:
-        case Format::kHlslFxc: {
-            if (options.use_ir) {
-                // Renaming is handled in the backend.
-                break;
-            }
-            if (!options.rename_all) {
-                transform_inputs.Add<tint::ast::transform::Renamer::Config>(
-                    tint::ast::transform::Renamer::Target::kHlslKeywords);
-            }
-            transform_manager.Add<tint::ast::transform::Renamer>();
-            break;
-        }
-        case Format::kSpirv:
-        case Format::kSpvAsm:
-            // Renaming is handled in the backend.
-            break;
-        case Format::kWgsl:
-        case Format::kIr: {
-            if (options.rename_all) {
-                transform_manager.Add<tint::ast::transform::Renamer>();
-            }
-            break;
-        }
-        case Format::kNone:
-        case Format::kUnknown:
-            break;
-    }
-}
-
-tint::diag::Result<std::unordered_map<tint::OverrideId, double>> CreateOverrideMap(
-    Options& options,
-    tint::inspector::Inspector& inspector) {
+[[maybe_unused]] tint::diag::Result<tint::core::ir::transform::SubstituteOverridesConfig>
+CreateOverrideMap(Options& options, tint::inspector::Inspector& inspector) {
     auto override_names = inspector.GetNamedOverrideIds();
 
-    std::unordered_map<tint::OverrideId, double> values;
-    values.reserve(options.overrides.Count());
+    tint::core::ir::transform::SubstituteOverridesConfig cfg;
+    cfg.map.reserve(options.overrides.Count());
     for (auto& override : options.overrides) {
         const auto& override_name = override.key.Value();
         const auto& override_value = override.value;
@@ -668,7 +691,7 @@ tint::diag::Result<std::unordered_map<tint::OverrideId, double>> CreateOverrideM
         auto num = tint::strconv::ParseNumber<decltype(tint::OverrideId::value)>(override_name);
         if (num == tint::Success) {
             tint::OverrideId id{num.Get()};
-            values.emplace(id, override_value);
+            cfg.map.emplace(id, override_value);
             continue;
         }
 
@@ -676,59 +699,9 @@ tint::diag::Result<std::unordered_map<tint::OverrideId, double>> CreateOverrideM
         if (it == override_names.end()) {
             return tint::diag::Failure("unknown override '" + override_name + "'");
         }
-        values.emplace(it->second, override_value);
+        cfg.map.emplace(it->second, override_value);
     }
-    return values;
-}
-
-void AddSubstituteOverrides(std::unordered_map<tint::OverrideId, double> values,
-                            tint::ast::transform::Manager& transform_manager,
-                            tint::ast::transform::DataMap& transform_inputs) {
-    tint::ast::transform::SubstituteOverride::Config cfg;
-    cfg.map = std::move(values);
-
-    transform_inputs.Add<tint::ast::transform::SubstituteOverride::Config>(cfg);
-    transform_manager.Add<tint::ast::transform::SubstituteOverride>();
-}
-
-[[maybe_unused]] tint::diag::Result<tint::Program> ProcessASTTransforms(
-    Options& options,
-    tint::inspector::Inspector& inspector,
-    tint::Program& program,
-    std::optional<tint::ast::transform::SubstituteOverride::Config>& cfg) {
-    tint::ast::transform::Manager transform_manager;
-    tint::ast::transform::DataMap transform_inputs;
-
-    // In the case where there are no entry points, the ep_name is blank and we need to skip single
-    // entry point.
-    if (!options.use_ir && options.ep_name != "") {
-        transform_manager.append(std::make_unique<tint::ast::transform::SingleEntryPoint>());
-        transform_inputs.Add<tint::ast::transform::SingleEntryPoint::Config>(options.ep_name);
-    }
-
-    AddRenamer(options, transform_manager, transform_inputs);
-
-    auto res = CreateOverrideMap(options, inspector);
-    if (res != tint::Success) {
-        return res.Failure();
-    }
-    if (options.use_ir) {
-        tint::ast::transform::SubstituteOverride::Config cfg_temp;
-        cfg_temp.map = std::move(res.Get());
-        cfg = cfg_temp;
-    } else {
-        AddSubstituteOverrides(res.Get(), transform_manager, transform_inputs);
-    }
-
-    tint::ast::transform::DataMap outputs;
-    auto transformed = transform_manager.Run(program, std::move(transform_inputs), outputs);
-    if (!transformed.IsValid()) {
-        std::stringstream err;
-        tint::cmd::PrintWGSL(err, transformed);
-        err << transformed.Diagnostics() << "\n";
-        return tint::diag::Failure(err.str());
-    }
-    return transformed;
+    return cfg;
 }
 
 #if TINT_BUILD_SPV_WRITER
@@ -780,16 +753,8 @@ bool GenerateSpirv([[maybe_unused]] Options& options,
                    [[maybe_unused]] tint::inspector::Inspector& inspector,
                    [[maybe_unused]] tint::Program& src_program) {
 #if TINT_BUILD_SPV_WRITER
-
-    std::optional<tint::ast::transform::SubstituteOverride::Config> cfg;
-    auto res = ProcessASTTransforms(options, inspector, src_program, cfg);
-    if (res != tint::Success) {
-        std::cerr << res.Failure() << "\n";
-        return true;
-    }
-
     // Convert the AST program to an IR module.
-    auto ir = tint::wgsl::reader::ProgramToLoweredIR(res.Get());
+    auto ir = tint::wgsl::reader::ProgramToLoweredIR(src_program);
     if (ir != tint::Success) {
         std::cerr << "Failed to generate IR: " << ir << "\n";
         return false;
@@ -804,18 +769,19 @@ bool GenerateSpirv([[maybe_unused]] Options& options,
         }
     }
 
-    if (cfg) {
-        // this needs to run after SingleEntryPoint transform which removes unused
-        // overrides for the current entry point.
-        tint::core::ir::transform::SubstituteOverridesConfig ir_cfg;
-        ir_cfg.map = cfg->map;
-        auto substituteOverridesResult =
-            tint::core::ir::transform::SubstituteOverrides(ir.Get(), ir_cfg);
-        if (substituteOverridesResult != tint::Success) {
-            std::cerr << "Pipeline override substitution (IR) failed:\n"
-                      << substituteOverridesResult.Failure() << "\n";
-            return false;
-        }
+    // this needs to run after SingleEntryPoint transform which removes unused
+    // overrides for the current entry point.
+    auto substitute_override_cfg = CreateOverrideMap(options, inspector);
+    if (substitute_override_cfg != tint::Success) {
+        std::cerr << "Failed to create override map: " << substitute_override_cfg.Failure() << "\n";
+        return false;
+    }
+    auto substituteOverridesResult =
+        tint::core::ir::transform::SubstituteOverrides(ir.Get(), substitute_override_cfg.Get());
+    if (substituteOverridesResult != tint::Success) {
+        std::cerr << "Pipeline override substitution (IR) failed:\n"
+                  << substituteOverridesResult.Failure() << "\n";
+        return false;
     }
 
     tint::spirv::writer::Options gen_options;
@@ -826,14 +792,15 @@ bool GenerateSpirv([[maybe_unused]] Options& options,
     gen_options.disable_robustness = !options.enable_robustness;
     gen_options.disable_workgroup_init = options.disable_workgroup_init;
     gen_options.use_storage_input_output_16 = options.use_storage_input_output_16;
+    gen_options.spirv_version = options.spirv_version;
 
     auto entry_point = inspector.GetEntryPoint(options.ep_name);
 
-    // Push constant Offset must be 4-byte aligned.
-    uint32_t offset = tint::RoundUp(4u, entry_point.push_constant_size);
+    // Immediate data Offset must be 4-byte aligned.
+    uint32_t offset = tint::RoundUp(4u, entry_point.immediate_data_size);
 
     if (entry_point.frag_depth_used) {
-        // Place the RangeOffset push constant member after user-defined push constants (if
+        // Place the RangeOffset immediate data member after user-defined immediate data (if
         // any).
         gen_options.depth_range_offsets = {offset + 0, offset + 4};
         offset += 8;
@@ -858,7 +825,7 @@ bool GenerateSpirv([[maybe_unused]] Options& options,
     // Generate SPIR-V from Tint IR.
     auto result = tint::spirv::writer::Generate(ir.Get(), gen_options);
     if (result != tint::Success) {
-        tint::cmd::PrintWGSL(std::cerr, res.Get());
+        tint::cmd::PrintWGSL(std::cerr, src_program);
         std::cerr << "Failed to generate SPIR-V: " << result.Failure() << "\n";
         return false;
     }
@@ -955,16 +922,8 @@ bool GenerateMsl([[maybe_unused]] Options& options,
                  [[maybe_unused]] tint::inspector::Inspector& inspector,
                  [[maybe_unused]] tint::Program& src_program) {
 #if TINT_BUILD_MSL_WRITER
-
-    std::optional<tint::ast::transform::SubstituteOverride::Config> cfg;
-    auto transform_res = ProcessASTTransforms(options, inspector, src_program, cfg);
-    if (transform_res != tint::Success) {
-        std::cerr << transform_res.Failure() << "\n";
-        return true;
-    }
-
     // Convert the AST program to an IR module.
-    auto ir = tint::wgsl::reader::ProgramToLoweredIR(transform_res.Get());
+    auto ir = tint::wgsl::reader::ProgramToLoweredIR(src_program);
     if (ir != tint::Success) {
         std::cerr << "Failed to generate IR: " << ir << "\n";
         return false;
@@ -979,18 +938,19 @@ bool GenerateMsl([[maybe_unused]] Options& options,
         }
     }
 
-    if (cfg) {
-        // this needs to run after SingleEntryPoint transform which removes unused
-        // overrides for the current entry point.
-        tint::core::ir::transform::SubstituteOverridesConfig ir_cfg;
-        ir_cfg.map = cfg->map;
-        auto substituteOverridesResult =
-            tint::core::ir::transform::SubstituteOverrides(ir.Get(), ir_cfg);
-        if (substituteOverridesResult != tint::Success) {
-            std::cerr << "Pipeline override substitution (IR) failed:\n"
-                      << substituteOverridesResult.Failure() << "\n";
-            return false;
-        }
+    // this needs to run after SingleEntryPoint transform which removes unused
+    // overrides for the current entry point.
+    auto substitute_override_cfg = CreateOverrideMap(options, inspector);
+    if (substitute_override_cfg != tint::Success) {
+        std::cerr << "Failed to create override map: " << substitute_override_cfg.Failure() << "\n";
+        return false;
+    }
+    auto substituteOverridesResult =
+        tint::core::ir::transform::SubstituteOverrides(ir.Get(), substitute_override_cfg.Get());
+    if (substituteOverridesResult != tint::Success) {
+        std::cerr << "Pipeline override substitution (IR) failed:\n"
+                  << substituteOverridesResult.Failure() << "\n";
+        return false;
     }
 
     {
@@ -1014,6 +974,7 @@ bool GenerateMsl([[maybe_unused]] Options& options,
     gen_options.bindings = tint::msl::writer::GenerateBindings(ir.Get());
     gen_options.array_length_from_uniform.ubo_binding = 30;
     gen_options.disable_demote_to_helper = options.disable_demote_to_helper;
+    gen_options.use_argument_buffers = options.use_argument_buffers;
 
     // Add array_length_from_uniform entries for all storage buffers with runtime sized arrays.
     std::unordered_set<tint::BindingPoint> storage_bindings;
@@ -1046,7 +1007,7 @@ bool GenerateMsl([[maybe_unused]] Options& options,
 
     auto result = tint::msl::writer::Generate(ir.Get(), gen_options);
     if (result != tint::Success) {
-        tint::cmd::PrintWGSL(std::cerr, transform_res.Get());
+        tint::cmd::PrintWGSL(std::cerr, src_program);
         std::cerr << "Failed to generate: " << result.Failure() << "\n";
         return false;
     }
@@ -1104,13 +1065,6 @@ bool GenerateHlsl([[maybe_unused]] Options& options,
                   [[maybe_unused]] tint::inspector::Inspector& inspector,
                   [[maybe_unused]] tint::Program& src_program) {
 #if TINT_BUILD_HLSL_WRITER
-    std::optional<tint::ast::transform::SubstituteOverride::Config> cfg;
-    auto res = ProcessASTTransforms(options, inspector, src_program, cfg);
-    if (res != tint::Success) {
-        std::cerr << res.Failure() << "\n";
-        return true;
-    }
-
     const bool for_fxc = options.format == Format::kHlslFxc;
     // Set up the backend options.
     tint::hlsl::writer::Options gen_options;
@@ -1120,7 +1074,6 @@ bool GenerateHlsl([[maybe_unused]] Options& options,
     }
     gen_options.disable_robustness = !options.enable_robustness;
     gen_options.disable_workgroup_init = options.disable_workgroup_init;
-    gen_options.bindings = tint::hlsl::writer::GenerateBindings(res.Get());
     gen_options.pixel_local = options.pixel_local_options;
     gen_options.polyfill_dot_4x8_packed = options.hlsl_shader_model < kMinShaderModelForDP4aInHLSL;
     gen_options.polyfill_pack_unpack_4x8 =
@@ -1128,52 +1081,48 @@ bool GenerateHlsl([[maybe_unused]] Options& options,
     gen_options.compiler = for_fxc ? tint::hlsl::writer::Options::Compiler::kFXC
                                    : tint::hlsl::writer::Options::Compiler::kDXC;
 
-    tint::Result<tint::hlsl::writer::Output> result;
-    if (options.use_ir) {
-        // Convert the AST program to an IR module.
-        auto ir = tint::wgsl::reader::ProgramToLoweredIR(res.Get());
-        if (ir != tint::Success) {
-            std::cerr << "Failed to generate IR: " << ir << "\n";
-            return false;
-        }
+    // Convert the AST program to an IR module.
+    auto ir = tint::wgsl::reader::ProgramToLoweredIR(src_program);
+    if (ir != tint::Success) {
+        std::cerr << "Failed to generate IR: " << ir << "\n";
+        return false;
+    }
+    gen_options.bindings = tint::hlsl::writer::GenerateBindings(ir.Get());
 
-        if (options.ep_name != "") {
-            auto singleEntryPointResult =
-                tint::core::ir::transform::SingleEntryPoint(ir.Get(), options.ep_name);
-            if (singleEntryPointResult != tint::Success) {
-                std::cerr << "Pipeline single entry point (IR) failed:\n"
-                          << singleEntryPointResult.Failure() << "\n";
-            }
+    if (options.ep_name != "") {
+        auto singleEntryPointResult =
+            tint::core::ir::transform::SingleEntryPoint(ir.Get(), options.ep_name);
+        if (singleEntryPointResult != tint::Success) {
+            std::cerr << "Pipeline single entry point (IR) failed:\n"
+                      << singleEntryPointResult.Failure() << "\n";
         }
-
-        if (cfg) {
-            // this needs to run after SingleEntryPoint transform which removes unused
-            // overrides for the current entry point.
-            tint::core::ir::transform::SubstituteOverridesConfig ir_cfg;
-            ir_cfg.map = cfg->map;
-            auto substituteOverridesResult =
-                tint::core::ir::transform::SubstituteOverrides(ir.Get(), ir_cfg);
-            if (substituteOverridesResult != tint::Success) {
-                std::cerr << "Pipeline override substitution (IR) failed:\n"
-                          << substituteOverridesResult.Failure() << "\n";
-                return false;
-            }
-        }
-
-        // Check that the module and options are supported by the backend.
-        auto check = tint::hlsl::writer::CanGenerate(ir.Get(), gen_options);
-        if (check != tint::Success) {
-            std::cerr << check.Failure() << "\n";
-            return false;
-        }
-
-        result = tint::hlsl::writer::Generate(ir.Get(), gen_options);
-    } else {
-        result = tint::hlsl::writer::Generate(res.Get(), gen_options);
     }
 
+    // this needs to run after SingleEntryPoint transform which removes unused
+    // overrides for the current entry point.
+    auto substitute_override_cfg = CreateOverrideMap(options, inspector);
+    if (substitute_override_cfg != tint::Success) {
+        std::cerr << "Failed to create override map: " << substitute_override_cfg.Failure() << "\n";
+        return false;
+    }
+    auto substituteOverridesResult =
+        tint::core::ir::transform::SubstituteOverrides(ir.Get(), substitute_override_cfg.Get());
+    if (substituteOverridesResult != tint::Success) {
+        std::cerr << "Pipeline override substitution (IR) failed:\n"
+                  << substituteOverridesResult.Failure() << "\n";
+        return false;
+    }
+
+    // Check that the module and options are supported by the backend.
+    auto check = tint::hlsl::writer::CanGenerate(ir.Get(), gen_options);
+    if (check != tint::Success) {
+        std::cerr << check.Failure() << "\n";
+        return false;
+    }
+
+    auto result = tint::hlsl::writer::Generate(ir.Get(), gen_options);
     if (result != tint::Success) {
-        tint::cmd::PrintWGSL(std::cerr, res.Get());
+        tint::cmd::PrintWGSL(std::cerr, src_program);
         std::cerr << "Failed to generate: " << result.Failure() << "\n";
         return false;
     }
@@ -1199,7 +1148,7 @@ bool GenerateHlsl([[maybe_unused]] Options& options,
         auto dxc = tint::Command::LookPath(dxc_path);
         if (dxc.Found()) {
             uint32_t hlsl_shader_model = options.hlsl_shader_model;
-            auto enable_list = res->AST().Enables();
+            auto enable_list = src_program.AST().Enables();
             bool dxc_require_16bit_types = false;
             for (auto* enable : enable_list) {
                 if (enable->HasExtension(tint::wgsl::Extension::kF16)) {
@@ -1273,14 +1222,6 @@ bool GenerateGlsl([[maybe_unused]] Options& options,
                   [[maybe_unused]] tint::inspector::Inspector& inspector,
                   [[maybe_unused]] tint::Program& src_program) {
 #if TINT_BUILD_GLSL_WRITER
-
-    std::optional<tint::ast::transform::SubstituteOverride::Config> cfg;
-    auto res = ProcessASTTransforms(options, inspector, src_program, cfg);
-    if (res != tint::Success) {
-        std::cerr << res.Failure() << "\n";
-        return true;
-    }
-
     tint::glsl::writer::Options gen_options;
     gen_options.strip_all_names = options.rename_all;
     if (options.glsl_desktop) {
@@ -1294,11 +1235,11 @@ bool GenerateGlsl([[maybe_unused]] Options& options,
 
     auto entry_point = inspector.GetEntryPoint(options.ep_name);
 
-    // Push constant Offset must be 4-byte aligned.
-    uint32_t offset = tint::RoundUp(4u, entry_point.push_constant_size);
+    // Immediate data Offset must be 4-byte aligned.
+    uint32_t offset = tint::RoundUp(4u, entry_point.immediate_data_size);
 
     if (entry_point.instance_index_used) {
-        // Place the first_instance push constant member after user-defined push constants (if
+        // Place the first_instance immediate data member after user-defined immediate data (if
         // any).
         gen_options.first_instance_offset = offset;
         offset += 4;
@@ -1313,7 +1254,7 @@ bool GenerateGlsl([[maybe_unused]] Options& options,
     }
 
     // Convert the AST program to an IR module.
-    auto ir = tint::wgsl::reader::ProgramToLoweredIR(res.Get());
+    auto ir = tint::wgsl::reader::ProgramToLoweredIR(src_program);
     if (ir != tint::Success) {
         std::cerr << "Failed to generate IR: " << ir << "\n";
         return false;
@@ -1328,19 +1269,21 @@ bool GenerateGlsl([[maybe_unused]] Options& options,
         }
     }
 
-    if (cfg) {
-        // this needs to run after SingleEntryPoint transform which removes unused
-        // overrides for the current entry point.
-        tint::core::ir::transform::SubstituteOverridesConfig ir_cfg;
-        ir_cfg.map = cfg->map;
-        auto substituteOverridesResult =
-            tint::core::ir::transform::SubstituteOverrides(ir.Get(), ir_cfg);
-        if (substituteOverridesResult != tint::Success) {
-            std::cerr << "Pipeline override substitution (IR) failed:\n"
-                      << substituteOverridesResult.Failure() << "\n";
-            return false;
-        }
+    // this needs to run after SingleEntryPoint transform which removes unused
+    // overrides for the current entry point.
+    auto substitute_override_cfg = CreateOverrideMap(options, inspector);
+    if (substitute_override_cfg != tint::Success) {
+        std::cerr << "Failed to create override map: " << substitute_override_cfg.Failure() << "\n";
+        return false;
     }
+    auto substituteOverridesResult =
+        tint::core::ir::transform::SubstituteOverrides(ir.Get(), substitute_override_cfg.Get());
+    if (substituteOverridesResult != tint::Success) {
+        std::cerr << "Pipeline override substitution (IR) failed:\n"
+                  << substituteOverridesResult.Failure() << "\n";
+        return false;
+    }
+
     // Generate binding options.
     gen_options.bindings = tint::glsl::writer::GenerateBindings(ir.Get());
 
@@ -1352,7 +1295,7 @@ bool GenerateGlsl([[maybe_unused]] Options& options,
     }
 
     // Generate GLSL.
-    auto result = tint::glsl::writer::Generate(ir.Get(), gen_options, "");
+    auto result = tint::glsl::writer::Generate(ir.Get(), gen_options);
     if (result != tint::Success) {
         std::cerr << "Failed to generate: " << result.Failure() << "\n";
         return false;
@@ -1374,16 +1317,17 @@ bool GenerateGlsl([[maybe_unused]] Options& options,
 #else
         // If there is no entry point name there is nothing to validate
         if (options.ep_name != "") {
-            tint::ast::PipelineStage stage = tint::ast::PipelineStage::kCompute;
+            tint::core::ir::Function::PipelineStage stage =
+                tint::core::ir::Function::PipelineStage::kCompute;
             switch (entry_point.stage) {
                 case tint::inspector::PipelineStage::kCompute:
-                    stage = tint::ast::PipelineStage::kCompute;
+                    stage = tint::core::ir::Function::PipelineStage::kCompute;
                     break;
                 case tint::inspector::PipelineStage::kVertex:
-                    stage = tint::ast::PipelineStage::kVertex;
+                    stage = tint::core::ir::Function::PipelineStage::kVertex;
                     break;
                 case tint::inspector::PipelineStage::kFragment:
-                    stage = tint::ast::PipelineStage::kFragment;
+                    stage = tint::core::ir::Function::PipelineStage::kFragment;
                     break;
             }
 
@@ -1425,16 +1369,15 @@ bool DumpIR([[maybe_unused]] const tint::Program& program,
 #endif
 }
 
-}  // namespace
-
-int main(int argc, const char** argv) {
-    tint::Vector<std::string_view, 8> arguments = tint::args::Vectorize(argc, argv);
+int Run(tint::VectorRef<std::string_view> arguments, ExeMode exe_mode) {
     Options options;
 
-    tint::Initialize();
-    tint::SetInternalCompilerErrorReporter(&tint::cmd::TintInternalCompilerErrorReporter);
+    if (!ParseArgs(arguments, &options, exe_mode)) {
+        return 1;
+    }
 
-    if (!ParseArgs(arguments, &options)) {
+    if (exe_mode == ExeMode::kServer && options.format == Format::kSpirv) {
+        std::cerr << "Cannot emit binary SPIR-V to stdout in server mode\n";
         return 1;
     }
 
@@ -1448,17 +1391,11 @@ int main(int argc, const char** argv) {
         options.format = Format::kSpvAsm;
     }
 
-    // TODO(crbug.com/344563756): Remove the user option for 'use_ir' once the ir is launched on all
-    // backends.
-    if (options.format != Format::kHlsl && options.format != Format::kHlslFxc) {
-        options.use_ir = true;
-    }
-
     tint::cmd::LoadProgramOptions opts;
     opts.filename = options.input_filename;
     opts.printer = options.printer.get();
 #if TINT_BUILD_SPV_READER
-    opts.use_ir = options.use_ir_reader;
+    opts.use_ir_reader = options.use_ir_reader;
     opts.spirv_reader_options = options.spirv_reader_options;
     // Allow the shader-f16 extension
     opts.spirv_reader_options.allowed_features = tint::wgsl::AllowedFeatures::Everything();
@@ -1570,4 +1507,62 @@ int main(int argc, const char** argv) {
         }
     }
     return success ? 0 : 1;
+}
+
+/// Run a server that accepts arguments on stdin.
+/// @returns 0 on success, non-zero on failure
+int RunServer() {
+    // Each line read from stdin will invoke Tint with the supplied arguments.
+    // Output on stdout and stderr will be delimited with \0 characters.
+    // The server will exit on failure or if stdin is closed.
+    while (!std::cin.eof()) {
+        // Read the next set of arguments.
+        std::string arg_line;
+        std::getline(std::cin, arg_line);
+
+        // Split the arguments by whitespace, taking double-quotes into account.
+        std::istringstream arg_in(arg_line);
+        tint::Vector<std::string, 8> arg_tokens;
+        while (!arg_in.eof()) {
+            std::string arg;
+            arg_in >> std::quoted(arg, '"', '\0');
+            if (!arg.empty()) {
+                arg_tokens.Push(arg);
+            }
+        }
+
+        // Run Tint with the provided arguments.
+        auto arguments =
+            tint::Transform(arg_tokens, [](const std::string& arg) -> std::string_view {
+                return std::string_view(arg);  //
+            });
+        auto ret = Run(arguments, ExeMode::kServer);
+        if (ret != 0) {
+            // The Tint invocation failed, so exit the server.
+            return ret;
+        }
+
+        // Delimit stdout and stderr with \0 and flush them.
+        std::cout << '\0' << std::flush;
+        std::cerr << '\0' << std::flush;
+    }
+    return 0;
+}
+
+}  // namespace
+
+int main(int argc, const char** argv) {
+    tint::Vector<std::string_view, 8> arguments = tint::args::Vectorize(argc, argv);
+
+    tint::Initialize();
+
+    if (arguments.Length() > 0 && arguments[0] == "--server") {
+        if (arguments.Length() > 1) {
+            std::cerr << "--server must not be used with any other arguments\n";
+            return 1;
+        }
+        return RunServer();
+    }
+
+    return Run(arguments, ExeMode::kStandalone);
 }

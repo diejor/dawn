@@ -44,8 +44,10 @@ class InstanceLevelTests : public testing::Test {
     void SetUp() override {
         wgpu::InstanceDescriptor descriptor = {};
         // The unit tests use wgpuInstanceWaitAny(WGPUFuture, timeoutNS) with timeoutNS > 0
-        // which requires the `timedWaitAnyEnable` property enabled on the instance capability.
-        descriptor.capabilities.timedWaitAnyEnable = true;
+        // which requires TimedWaitAny enabled on the instance.
+        static constexpr auto kTimedWaitAny = wgpu::InstanceFeatureName::TimedWaitAny;
+        descriptor.requiredFeatureCount = 1;
+        descriptor.requiredFeatures = &kTimedWaitAny;
         instance = wgpu::CreateInstance(&descriptor);
     }
 
@@ -116,7 +118,7 @@ TEST_F(AdapterLevelTests, RequestDevice) {
 
 TEST_F(AdapterLevelTests, RequestDeviceThenDestroy) {
     wgpu::Device device = nullptr;
-    wgpu::DeviceLostReason reason;
+    wgpu::DeviceLostReason reason{};
 
     wgpu::DeviceDescriptor descriptor = {};
     descriptor.SetDeviceLostCallback(
@@ -134,12 +136,17 @@ TEST_F(AdapterLevelTests, RequestDeviceThenDestroy) {
 }
 
 TEST_F(AdapterLevelTests, RequestDeviceThenDrop) {
-    wgpu::DeviceLostReason reason;
+    wgpu::DeviceLostReason reason{};
 
     wgpu::DeviceDescriptor descriptor = {};
     descriptor.SetDeviceLostCallback(
         wgpu::CallbackMode::AllowSpontaneous,
-        [&reason](const wgpu::Device&, wgpu::DeviceLostReason r, wgpu::StringView) { reason = r; });
+        [&reason](const wgpu::Device& d, wgpu::DeviceLostReason r, wgpu::StringView) {
+            reason = r;
+            // d should be null even though this is called during wgpuDeviceRelease()
+            // so the allocation hasn't been freed yet.
+            EXPECT_EQ(nullptr, d.Get());
+        });
     wgpu::Device device = RequestDevice(&descriptor);
 
     auto deviceLostFuture = device.GetLostFuture();
@@ -270,13 +277,12 @@ TEST_F(DeviceLevelTests, BufferMapAndWorkDone) {
     queue.Submit(1, &commands);
 
     wgpu::QueueWorkDoneStatus copyStatus;
-    EXPECT_EQ(
-        instance.WaitAny(queue.OnSubmittedWorkDone(wgpu::CallbackMode::AllowSpontaneous,
-                                                   [&copyStatus](wgpu::QueueWorkDoneStatus status) {
-                                                       copyStatus = status;
-                                                   }),
-                         UINT64_MAX),
-        wgpu::WaitStatus::Success);
+    EXPECT_EQ(instance.WaitAny(queue.OnSubmittedWorkDone(
+                                   wgpu::CallbackMode::AllowSpontaneous,
+                                   [&copyStatus](wgpu::QueueWorkDoneStatus status,
+                                                 wgpu::StringView) { copyStatus = status; }),
+                               UINT64_MAX),
+              wgpu::WaitStatus::Success);
     ASSERT_EQ(copyStatus, wgpu::QueueWorkDoneStatus::Success);
 
     // Map the readable buffer and verify the contents.

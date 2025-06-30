@@ -30,8 +30,7 @@
 #include <algorithm>
 #include <array>
 
-#include "src/tint/lang/core/builtin_fn.h"
-#include "src/tint/lang/core/builtin_value.h"
+#include "src/tint/lang/core/enums.h"
 #include "src/tint/lang/core/fluent_types.h"
 #include "src/tint/lang/core/type/depth_texture.h"
 #include "src/tint/lang/core/type/sampled_texture.h"
@@ -156,7 +155,6 @@
 
 using namespace tint::core::number_suffixes;  // NOLINT
 using namespace tint::core::fluent_types;     // NOLINT
-
 
 namespace tint::spirv::reader::ast_parser {
 namespace {
@@ -2316,7 +2314,7 @@ bool FunctionEmitter::ClassifyCFGEdges() {
                     return Fail() << "Fallthrough not permitted in WGSL";
                 }
             }  // end forward edge
-        }      // end successor
+        }  // end successor
 
         if (num_backedges > 1) {
             return Fail() << "Block " << src << " has too many backedges: " << num_backedges;

@@ -32,11 +32,11 @@
 #include <sstream>
 #include <string>
 
-#include "dawn/common/BitSetIterator.h"
 #include "dawn/native/BindGroupLayoutInternal.h"
 #include "dawn/native/Device.h"
 #include "dawn/native/Pipeline.h"
 #include "dawn/native/opengl/BufferGL.h"
+#include "dawn/native/opengl/DeviceGL.h"
 #include "dawn/native/opengl/Forward.h"
 #include "dawn/native/opengl/OpenGLFunctions.h"
 #include "dawn/native/opengl/PipelineLayoutGL.h"
@@ -69,40 +69,25 @@ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
     }
 
     // Create an OpenGL shader for each stage and gather the list of combined samplers.
-    PerStage<CombinedSamplerInfo> combinedSamplers;
-    bool needsPlaceholderSampler = false;
+    std::set<CombinedSampler> combinedSamplers;
+    mNeedsSSBOLengthUniformBuffer = false;
     std::vector<GLuint> glShaders;
     for (SingleShaderStage stage : IterateStages(activeStages)) {
         ShaderModule* module = ToBackend(stages[stage].module.Get());
+        bool needsSSBOLengthUniformBuffer = false;
+        std::vector<CombinedSampler> stageCombinedSamplers;
         GLuint shader;
-        DAWN_TRY_ASSIGN(
-            shader,
-            module->CompileShader(
-                gl, stages[stage], stage, usesVertexIndex, usesInstanceIndex, usesFragDepth,
-                bgraSwizzleAttributes, &combinedSamplers[stage], layout, &needsPlaceholderSampler,
-                &mNeedsTextureBuiltinUniformBuffer, &mBindingPointEmulatedBuiltins));
-        // XXX transform to flip some attributes from RGBA to BGRA
+        DAWN_TRY_ASSIGN(shader, module->CompileShader(gl, stages[stage], stage, usesVertexIndex,
+                                                      usesInstanceIndex, usesFragDepth,
+                                                      bgraSwizzleAttributes, &stageCombinedSamplers,
+                                                      layout, &mBindingPointEmulatedBuiltins,
+                                                      &needsSSBOLengthUniformBuffer));
+
+        mNeedsSSBOLengthUniformBuffer |= needsSSBOLengthUniformBuffer;
+        combinedSamplers.insert(stageCombinedSamplers.begin(), stageCombinedSamplers.end());
+
         DAWN_GL_TRY(gl, AttachShader(mProgram, shader));
         glShaders.push_back(shader);
-    }
-
-    if (needsPlaceholderSampler) {
-        SamplerDescriptor desc = {};
-        DAWN_ASSERT(desc.minFilter == wgpu::FilterMode::Nearest);
-        DAWN_ASSERT(desc.magFilter == wgpu::FilterMode::Nearest);
-        DAWN_ASSERT(desc.mipmapFilter == wgpu::MipmapFilterMode::Nearest);
-        Ref<SamplerBase> sampler;
-        DAWN_TRY_ASSIGN(sampler, layout->GetDevice()->GetOrCreateSampler(&desc));
-        mPlaceholderSampler = ToBackend(std::move(sampler));
-    }
-
-    if (!mBindingPointEmulatedBuiltins.empty()) {
-        BufferDescriptor desc = {};
-        desc.size = mBindingPointEmulatedBuiltins.size() * sizeof(uint32_t);
-        desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        Ref<BufferBase> buffer;
-        DAWN_TRY_ASSIGN(buffer, layout->GetDevice()->CreateBuffer(&desc));
-        mTextureBuiltinsBuffer = ToBackend(std::move(buffer));
     }
 
     // Link all the shaders together.
@@ -125,19 +110,12 @@ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
     DAWN_GL_TRY(gl, UseProgram(mProgram));
     const auto& indices = layout->GetBindingIndexInfo();
 
-    std::set<CombinedSampler> combinedSamplersSet;
-    for (SingleShaderStage stage : IterateStages(activeStages)) {
-        for (const CombinedSampler& combined : combinedSamplers[stage]) {
-            combinedSamplersSet.insert(combined);
-        }
-    }
-
     mUnitsForSamplers.resize(layout->GetNumSamplers());
     mUnitsForTextures.resize(layout->GetNumSampledTextures());
 
     GLuint textureUnit = layout->GetTextureUnitsUsed();
-    for (const auto& combined : combinedSamplersSet) {
-        const std::string& name = combined.GetName();
+    for (const auto& combined : combinedSamplers) {
+        std::string name = combined.GetName();
         GLint location = DAWN_GL_TRY(gl, GetUniformLocation(mProgram, name.c_str()));
 
         if (location == -1) {
@@ -161,14 +139,14 @@ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
                                  sampleType == wgpu::TextureSampleType::Depth;
         }
         {
-            if (combined.usePlaceholderSampler) {
+            if (!combined.samplerLocation) {
                 mPlaceholderSamplerUnits.push_back(textureUnit);
             } else {
                 const BindGroupLayoutInternalBase* bgl =
-                    layout->GetBindGroupLayout(combined.samplerLocation.group);
-                BindingIndex bindingIndex = bgl->GetBindingIndex(combined.samplerLocation.binding);
+                    layout->GetBindGroupLayout(combined.samplerLocation->group);
+                BindingIndex bindingIndex = bgl->GetBindingIndex(combined.samplerLocation->binding);
 
-                GLuint samplerIndex = indices[combined.samplerLocation.group][bindingIndex];
+                GLuint samplerIndex = indices[combined.samplerLocation->group][bindingIndex];
                 mUnitsForSamplers[samplerIndex].push_back({textureUnit, shouldUseFiltering});
             }
         }
@@ -176,12 +154,20 @@ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
         textureUnit++;
     }
 
+    if (!mPlaceholderSamplerUnits.empty()) {
+        SamplerDescriptor desc = {};
+        DAWN_ASSERT(desc.minFilter == wgpu::FilterMode::Nearest);
+        DAWN_ASSERT(desc.magFilter == wgpu::FilterMode::Nearest);
+        DAWN_ASSERT(desc.mipmapFilter == wgpu::MipmapFilterMode::Nearest);
+        Ref<SamplerBase> sampler;
+        DAWN_TRY_ASSIGN(sampler, layout->GetDevice()->GetOrCreateSampler(&desc));
+        mPlaceholderSampler = ToBackend(std::move(sampler));
+    }
+
     for (GLuint glShader : glShaders) {
         DAWN_GL_TRY(gl, DetachShader(mProgram, glShader));
         DAWN_GL_TRY(gl, DeleteShader(glShader));
     }
-
-    mInternalUniformBufferBinding = layout->GetInternalUniformBinding();
 
     return {};
 }
@@ -205,26 +191,26 @@ GLuint PipelineGL::GetProgramHandle() const {
     return mProgram;
 }
 
-MaybeError PipelineGL::ApplyNow(const OpenGLFunctions& gl) {
+MaybeError PipelineGL::ApplyNow(const OpenGLFunctions& gl, const PipelineLayout* layout) {
     DAWN_GL_TRY(gl, UseProgram(mProgram));
     for (GLuint unit : mPlaceholderSamplerUnits) {
         DAWN_ASSERT(mPlaceholderSampler.Get() != nullptr);
         DAWN_GL_TRY(gl, BindSampler(unit, mPlaceholderSampler->GetNonFilteringHandle()));
     }
 
-    if (mTextureBuiltinsBuffer.Get() != nullptr) {
-        DAWN_GL_TRY(gl, BindBufferBase(GL_UNIFORM_BUFFER, mInternalUniformBufferBinding,
-                                       mTextureBuiltinsBuffer->GetHandle()));
-    }
     return {};
-}
-
-const Buffer* PipelineGL::GetInternalUniformBuffer() const {
-    return mTextureBuiltinsBuffer.Get();
 }
 
 const BindingPointToFunctionAndOffset& PipelineGL::GetBindingPointBuiltinDataInfo() const {
     return mBindingPointEmulatedBuiltins;
+}
+
+bool PipelineGL::NeedsTextureBuiltinUniformBuffer() const {
+    return !mBindingPointEmulatedBuiltins.empty();
+}
+
+bool PipelineGL::NeedsSSBOLengthUniformBuffer() const {
+    return mNeedsSSBOLengthUniformBuffer;
 }
 
 }  // namespace dawn::native::opengl

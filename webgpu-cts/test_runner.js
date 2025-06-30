@@ -143,7 +143,7 @@ function wrapPromiseWithHeartbeat(prototype, key) {
   prototype[key] = function (...args) {
     const promise = old.call(this, ...args);
     // Send a heartbeat just before any code that was waiting on the promise.
-    promise.finally(sendHeartbeat);
+    promise.then(sendHeartbeat, sendHeartbeat);
     // Return the original promise so we don't interfere with the behavior
     // of the API itself.
     return promise;
@@ -167,14 +167,9 @@ globalTestConfig.noRaceWithRejectOnTimeout = true;
 // simultaneously on a 32-bit system easily runs out of memory).
 globalTestConfig.maxSubcasesInFlight = 100;
 
-// FXC is very slow to compile unrolled const-eval loops, where the metal shader
-// compiler (Intel GPU) is very slow to compile rolled loops. Intel drivers for
-// linux may also suffer the same performance issues, so unroll const-eval loops
-// if we're not running on Windows.
-const isWindows = navigator.userAgent.includes("Windows");
-if (!isWindows) {
-  globalTestConfig.unrollConstEvalLoops = true;
-}
+
+
+
 
 let lastOptionsKey, testWorker;
 
@@ -215,8 +210,7 @@ async function runCtsTest(queryString) {
   if (powerPreference || compatibility) {
     setDefaultRequestAdapterOptions({
       ...(powerPreference && { powerPreference }),
-      // MAINTENANCE_TODO(gman): Change this to whatever the option ends up being
-      ...(compatibility && { compatibilityMode: true }),
+      ...(compatibility && { featureLevel: 'compatibility' }),
     });
   }
 

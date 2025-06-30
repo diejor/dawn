@@ -32,7 +32,7 @@
 
 #include "src/tint/api/tint.h"
 #include "src/tint/cmd/common/helper.h"
-#include "src/tint/cmd/fuzz/ir/substitute_overrides_config.h"
+#include "src/tint/cmd/fuzz/ir/helpers/substitute_overrides_config.h"
 #include "src/tint/lang/core/ir/binary/encode.h"
 #include "src/tint/lang/core/ir/disassembler.h"
 #include "src/tint/lang/core/ir/module.h"
@@ -177,13 +177,12 @@ tint::Result<tint::core::ir::Module> GenerateIrModule(const tint::Program& progr
         return tint::Failure{"Unsupported enable used in shader"};
     }
 
-    auto cfg = tint::fuzz::ir::SubstituteOverridesConfig(program);
-
     auto ir = tint::wgsl::reader::ProgramToLoweredIR(program);
     if (ir != tint::Success) {
         return ir.Failure();
     }
 
+    auto cfg = tint::fuzz::ir::SubstituteOverridesConfig(ir.Get());
     auto substituteOverridesResult = tint::core::ir::transform::SubstituteOverrides(ir.Get(), cfg);
     if (substituteOverridesResult != tint::Success) {
         return substituteOverridesResult.Failure();
@@ -291,7 +290,6 @@ int main(int argc, const char** argv) {
     Options options;
 
     tint::Initialize();
-    tint::SetInternalCompilerErrorReporter(&tint::cmd::TintInternalCompilerErrorReporter);
 
     if (!ParseArgs(arguments, &options)) {
         return EXIT_FAILURE;

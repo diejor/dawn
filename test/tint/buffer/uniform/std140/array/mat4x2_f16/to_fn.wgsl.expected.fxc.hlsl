@@ -1,60 +1,76 @@
 SKIP: INVALID
 
+
 cbuffer cbuffer_u : register(b0) {
   uint4 u[4];
 };
 RWByteAddressBuffer s : register(u1);
-
 float16_t a(matrix<float16_t, 4, 2> a_1[4]) {
-  return a_1[0][0].x;
+  return a_1[int(0)][int(0)][0u];
 }
 
 float16_t b(matrix<float16_t, 4, 2> m) {
-  return m[0].x;
+  return m[int(0)][0u];
 }
 
 float16_t c(vector<float16_t, 2> v) {
-  return v.x;
+  return v[0u];
 }
 
-float16_t d(float16_t f_1) {
-  return f_1;
+float16_t d(float16_t f) {
+  return f;
 }
 
-matrix<float16_t, 4, 2> u_load_1(uint offset) {
-  const uint scalar_offset = ((offset + 0u)) / 4;
-  uint ubo_load = u[scalar_offset / 4][scalar_offset % 4];
-  const uint scalar_offset_1 = ((offset + 4u)) / 4;
-  uint ubo_load_1 = u[scalar_offset_1 / 4][scalar_offset_1 % 4];
-  const uint scalar_offset_2 = ((offset + 8u)) / 4;
-  uint ubo_load_2 = u[scalar_offset_2 / 4][scalar_offset_2 % 4];
-  const uint scalar_offset_3 = ((offset + 12u)) / 4;
-  uint ubo_load_3 = u[scalar_offset_3 / 4][scalar_offset_3 % 4];
-  return matrix<float16_t, 4, 2>(vector<float16_t, 2>(float16_t(f16tof32(ubo_load & 0xFFFF)), float16_t(f16tof32(ubo_load >> 16))), vector<float16_t, 2>(float16_t(f16tof32(ubo_load_1 & 0xFFFF)), float16_t(f16tof32(ubo_load_1 >> 16))), vector<float16_t, 2>(float16_t(f16tof32(ubo_load_2 & 0xFFFF)), float16_t(f16tof32(ubo_load_2 >> 16))), vector<float16_t, 2>(float16_t(f16tof32(ubo_load_3 & 0xFFFF)), float16_t(f16tof32(ubo_load_3 >> 16))));
+vector<float16_t, 2> tint_bitcast_to_f16(uint src) {
+  uint v = src;
+  float t_low = f16tof32((v & 65535u));
+  float t_high = f16tof32(((v >> 16u) & 65535u));
+  float16_t v_1 = float16_t(t_low);
+  return vector<float16_t, 2>(v_1, float16_t(t_high));
 }
 
-typedef matrix<float16_t, 4, 2> u_load_ret[4];
-u_load_ret u_load(uint offset) {
-  matrix<float16_t, 4, 2> arr[4] = (matrix<float16_t, 4, 2>[4])0;
+matrix<float16_t, 4, 2> v_2(uint start_byte_offset) {
+  uint4 v_3 = u[(start_byte_offset / 16u)];
+  vector<float16_t, 2> v_4 = tint_bitcast_to_f16((((((start_byte_offset % 16u) / 4u) == 2u)) ? (v_3.z) : (v_3.x)));
+  uint4 v_5 = u[((4u + start_byte_offset) / 16u)];
+  vector<float16_t, 2> v_6 = tint_bitcast_to_f16(((((((4u + start_byte_offset) % 16u) / 4u) == 2u)) ? (v_5.z) : (v_5.x)));
+  uint4 v_7 = u[((8u + start_byte_offset) / 16u)];
+  vector<float16_t, 2> v_8 = tint_bitcast_to_f16(((((((8u + start_byte_offset) % 16u) / 4u) == 2u)) ? (v_7.z) : (v_7.x)));
+  uint4 v_9 = u[((12u + start_byte_offset) / 16u)];
+  return matrix<float16_t, 4, 2>(v_4, v_6, v_8, tint_bitcast_to_f16(((((((12u + start_byte_offset) % 16u) / 4u) == 2u)) ? (v_9.z) : (v_9.x))));
+}
+
+typedef matrix<float16_t, 4, 2> ary_ret[4];
+ary_ret v_10(uint start_byte_offset) {
+  matrix<float16_t, 4, 2> a[4] = (matrix<float16_t, 4, 2>[4])0;
   {
-    for(uint i = 0u; (i < 4u); i = (i + 1u)) {
-      arr[i] = u_load_1((offset + (i * 16u)));
+    uint v_11 = 0u;
+    v_11 = 0u;
+    while(true) {
+      uint v_12 = v_11;
+      if ((v_12 >= 4u)) {
+        break;
+      }
+      a[v_12] = v_2((start_byte_offset + (v_12 * 16u)));
+      {
+        v_11 = (v_12 + 1u);
+      }
+      continue;
     }
   }
-  return arr;
+  matrix<float16_t, 4, 2> v_13[4] = a;
+  return v_13;
 }
 
 [numthreads(1, 1, 1)]
 void f() {
-  float16_t tint_symbol = a(u_load(0u));
-  float16_t tint_symbol_1 = b(u_load_1(16u));
-  uint ubo_load_4 = u[1].x;
-  float16_t tint_symbol_2 = c(vector<float16_t, 2>(float16_t(f16tof32(ubo_load_4 & 0xFFFF)), float16_t(f16tof32(ubo_load_4 >> 16))).yx);
-  uint ubo_load_5 = u[1].x;
-  float16_t tint_symbol_3 = d(vector<float16_t, 2>(float16_t(f16tof32(ubo_load_5 & 0xFFFF)), float16_t(f16tof32(ubo_load_5 >> 16))).yx.x);
-  s.Store<float16_t>(0u, (((tint_symbol + tint_symbol_1) + tint_symbol_2) + tint_symbol_3));
-  return;
+  matrix<float16_t, 4, 2> v_14[4] = v_10(0u);
+  float16_t v_15 = a(v_14);
+  float16_t v_16 = (v_15 + b(v_2(16u)));
+  float16_t v_17 = (v_16 + c(tint_bitcast_to_f16(u[1u].x).yx));
+  s.Store<float16_t>(0u, (v_17 + d(tint_bitcast_to_f16(u[1u].x).yx[0u])));
 }
+
 FXC validation failure:
 <scrubbed_path>(6,1-9): error X3000: unrecognized identifier 'float16_t'
 

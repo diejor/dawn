@@ -45,6 +45,7 @@ tint_add_target(tint_cmd_test_test_cmd test_cmd
 tint_target_add_dependencies(tint_cmd_test_test_cmd test_cmd
   tint_api
   tint_api_common_test
+  tint_cmd_fuzz_ir_helpers_test
   tint_lang_core_constant_test
   tint_lang_core_intrinsic_test
   tint_lang_core_ir_analysis_test
@@ -64,8 +65,8 @@ tint_target_add_dependencies(tint_cmd_test_test_cmd test_cmd
   tint_lang_spirv_reader_lower_test
   tint_lang_spirv_type_test
   tint_lang_wgsl_ast_test
-  tint_lang_wgsl_common_test
   tint_lang_wgsl_intrinsic_test
+  tint_lang_wgsl_ir_test
   tint_lang_wgsl_program_test
   tint_lang_wgsl_reader_lower_test
   tint_lang_wgsl_resolver_test
@@ -91,6 +92,7 @@ tint_target_add_dependencies(tint_cmd_test_test_cmd test_cmd
 
 tint_target_add_external_dependencies(tint_cmd_test_test_cmd test_cmd
   "gtest"
+  "src_utils_chromium_test_compat"
 )
 
 if(TINT_BUILD_GLSL_WRITER)
@@ -108,16 +110,9 @@ endif(TINT_BUILD_GLSL_WRITER AND TINT_BUILD_GLSL_VALIDATOR)
 
 if(TINT_BUILD_HLSL_WRITER)
   tint_target_add_dependencies(tint_cmd_test_test_cmd test_cmd
-    tint_lang_hlsl_writer_ast_printer_test
     tint_lang_hlsl_writer_test
   )
 endif(TINT_BUILD_HLSL_WRITER)
-
-if(TINT_BUILD_HLSL_WRITER AND TINT_BUILD_WGSL_READER AND TINT_BUILD_WGSL_WRITER)
-  tint_target_add_dependencies(tint_cmd_test_test_cmd test_cmd
-    tint_lang_hlsl_writer_ast_raise_test
-  )
-endif(TINT_BUILD_HLSL_WRITER AND TINT_BUILD_WGSL_READER AND TINT_BUILD_WGSL_WRITER)
 
 if(TINT_BUILD_IR_BINARY)
   tint_target_add_dependencies(tint_cmd_test_test_cmd test_cmd
@@ -181,12 +176,6 @@ if(TINT_BUILD_WGSL_READER)
     tint_lang_wgsl_reader_test
   )
 endif(TINT_BUILD_WGSL_READER)
-
-if(TINT_BUILD_WGSL_READER AND TINT_BUILD_WGSL_WRITER)
-  tint_target_add_dependencies(tint_cmd_test_test_cmd test_cmd
-    tint_lang_wgsl_ast_transform_test
-  )
-endif(TINT_BUILD_WGSL_READER AND TINT_BUILD_WGSL_WRITER)
 
 if(TINT_BUILD_WGSL_WRITER)
   tint_target_add_dependencies(tint_cmd_test_test_cmd test_cmd

@@ -30,10 +30,12 @@
 #include <utility>
 
 #include "spirv/unified1/spirv.h"
+#include "src/tint/lang/core/enums.h"
 #include "src/tint/lang/core/fluent_types.h"
 #include "src/tint/lang/core/ir/builder.h"
 #include "src/tint/lang/core/ir/module.h"
 #include "src/tint/lang/core/ir/validator.h"
+#include "src/tint/lang/core/type/binding_array.h"
 #include "src/tint/lang/core/type/builtin_structs.h"
 #include "src/tint/lang/core/type/depth_multisampled_texture.h"
 #include "src/tint/lang/core/type/depth_texture.h"
@@ -43,7 +45,6 @@
 #include "src/tint/lang/core/type/storage_texture.h"
 #include "src/tint/lang/core/type/texture.h"
 #include "src/tint/lang/spirv/ir/builtin_call.h"
-#include "src/tint/lang/spirv/ir/image_from_texture.h"
 #include "src/tint/lang/spirv/ir/literal_operand.h"
 #include "src/tint/lang/spirv/type/sampled_image.h"
 #include "src/tint/utils/ice/ice.h"
@@ -55,13 +56,105 @@ namespace tint::spirv::writer::raise {
 
 namespace {
 
+const spirv::type::Image* ImageFromTexture(core::type::Manager& ty,
+                                           const core::type::Texture* tex_ty) {
+    auto dim = type::Dim::kD1;
+    auto depth = type::Depth::kNotDepth;
+    auto arrayed = type::Arrayed::kNonArrayed;
+    auto ms = type::Multisampled::kSingleSampled;
+    auto sampled = type::Sampled::kSamplingCompatible;
+    auto fmt = core::TexelFormat::kUndefined;
+    auto access = core::Access::kReadWrite;
+    const core::type::Type* sample_ty = ty.f32();
+
+    switch (tex_ty->Dim()) {
+        case core::type::TextureDimension::k1d:
+            dim = type::Dim::kD1;
+            break;
+        case core::type::TextureDimension::k2d:
+            dim = type::Dim::kD2;
+            break;
+        case core::type::TextureDimension::k2dArray:
+            dim = type::Dim::kD2;
+            arrayed = type::Arrayed::kArrayed;
+            break;
+        case core::type::TextureDimension::k3d:
+            dim = type::Dim::kD3;
+            break;
+        case core::type::TextureDimension::kCube:
+            dim = type::Dim::kCube;
+            break;
+        case core::type::TextureDimension::kCubeArray:
+            dim = type::Dim::kCube;
+            arrayed = type::Arrayed::kArrayed;
+            break;
+        default:
+            TINT_ICE() << "Invalid texture dimension: " << tex_ty->Dim();
+    }
+
+    tint::Switch(
+        tex_ty,                                 //
+        [&](const core::type::DepthTexture*) {  //
+            depth = type::Depth::kDepth;
+        },
+        [&](const core::type::DepthMultisampledTexture*) {
+            depth = type::Depth::kDepth;
+            ms = type::Multisampled::kMultisampled;
+        },
+        [&](const core::type::MultisampledTexture* mt) {
+            ms = type::Multisampled::kMultisampled;
+            sample_ty = mt->Type();
+        },
+        [&](const core::type::SampledTexture* st) {
+            sampled = type::Sampled::kSamplingCompatible;
+            sample_ty = st->Type();
+        },
+        [&](const core::type::StorageTexture* st) {
+            sampled = type::Sampled::kReadWriteOpCompatible;
+            fmt = st->TexelFormat();
+            sample_ty = st->Type();
+            access = st->Access();
+        },
+        [&](const core::type::InputAttachment* ia) {
+            dim = type::Dim::kSubpassData;
+            sampled = type::Sampled::kReadWriteOpCompatible;
+            sample_ty = ia->Type();
+        },
+        TINT_ICE_ON_NO_MATCH);
+
+    return ty.Get<type::Image>(sample_ty, dim, depth, arrayed, ms, sampled, fmt, access);
+}
+
+/// Returns a replacement type if type replacement is necessary.
+/// @param ty the type manager
+/// @param type the type to replace
+/// @returns the replacement type if replacement needs to happen
+const core::type::Type* ReplacementType(core::type::Manager& ty, const core::type::Type* type) {
+    return Switch(
+        type,
+        [&](const core::type::Pointer* ptr) -> const core::type::Type* {
+            if (auto* replacement = ReplacementType(ty, ptr->StoreType())) {
+                return ty.ptr(ptr->AddressSpace(), replacement, ptr->Access());
+            }
+            return nullptr;
+        },
+        [&](const core::type::BindingArray* arr) -> const core::type::Type* {
+            if (auto* replacement = ReplacementType(ty, arr->ElemType())) {
+                return ty.binding_array(replacement,
+                                        arr->Count()->As<core::type::ConstantArrayCount>()->value);
+            }
+            return nullptr;
+        },
+        [&](const core::type::Texture* tex) { return ImageFromTexture(ty, tex); },
+        [&](Default) { return nullptr; });
+}
+
 /// PIMPL state for the transform.
 struct State {
     /// The IR module.
     core::ir::Module& ir;
 
-    /// If we should use the vulkan memory model
-    bool use_vulkan_memory_model = false;
+    PolyfillConfig config;
 
     /// The IR builder.
     core::ir::Builder b{ir};
@@ -74,28 +167,20 @@ struct State {
         // Find the builtins that need replacing.
         Vector<core::ir::CoreBuiltinCall*, 4> worklist;
 
-        // Convert function parameters to `spirv::type::Image` if necessary
+        // Replace types for function parameters if necessary
         for (auto fn : ir.functions) {
             for (auto* param : fn->Params()) {
-                if (auto* tex = param->Type()->As<core::type::Texture>()) {
-                    param->SetType(ir::ImageFromTexture(ty, tex));
+                if (auto* replacement = ReplacementType(ty, param->Type())) {
+                    param->SetType(replacement);
                 }
             }
         }
 
         for (auto* inst : ir.Instructions()) {
-            // Convert instruction results to `spirv::type::Image` if necessary
-            if (!inst->Results().IsEmpty()) {
-                if (auto* res = inst->Result(0)->As<core::ir::InstructionResult>()) {
-                    // Watch for pointers, which would be wrapping any texture on a `var`
-                    if (auto* tex = res->Type()->UnwrapPtr()->As<core::type::Texture>()) {
-                        auto* tex_ty = ir::ImageFromTexture(ty, tex);
-                        const core::type::Type* res_ty = tex_ty;
-                        if (auto* orig_ptr = res->Type()->As<core::type::Pointer>()) {
-                            res_ty = ty.ptr(orig_ptr->AddressSpace(), res_ty, orig_ptr->Access());
-                        }
-                        res->SetType(res_ty);
-                    }
+            // Replace types for instruction results if necessary
+            for (auto* result : inst->Results()) {
+                if (auto* replacement = ReplacementType(ty, result->Type())) {
+                    result->SetType(replacement);
                 }
             }
 
@@ -442,17 +527,19 @@ struct State {
             builtin->Args()[0],
         };
 
-        // If the condition is scalar and the objects are vectors, we need to splat the condition
-        // into a vector of the same size.
-        // TODO(jrprice): We don't need to do this if we're targeting SPIR-V 1.4 or newer.
-        auto* vec = builtin->Result()->Type()->As<core::type::Vector>();
-        if (vec && args[0]->Type()->Is<core::type::Scalar>()) {
-            Vector<core::ir::Value*, 4> elements;
-            elements.Resize(vec->Width(), args[0]);
+        if (config.version < SpvVersion::kSpv14) {
+            // If the condition is scalar and the objects are vectors, we need to splat the
+            // condition into a vector of the same size.
+            auto* vec = builtin->Result()->Type()->As<core::type::Vector>();
+            if (vec && args[0]->Type()->Is<core::type::Scalar>()) {
+                Vector<core::ir::Value*, 4> elements;
+                elements.Resize(vec->Width(), args[0]);
 
-            auto* construct = b.Construct(ty.vec(ty.bool_(), vec->Width()), std::move(elements));
-            construct->InsertBefore(builtin);
-            args[0] = construct->Result();
+                auto* construct =
+                    b.Construct(ty.vec(ty.bool_(), vec->Width()), std::move(elements));
+                construct->InsertBefore(builtin);
+                args[0] = construct->Result();
+            }
         }
 
         // Replace the builtin call with a call to the spirv.select intrinsic.
@@ -494,7 +581,7 @@ struct State {
         args.Push(nullptr);
 
         // Append the NonPrivateTexel flag to Read/Write storage textures when we load/store them.
-        if (use_vulkan_memory_model) {
+        if (config.use_vulkan_memory_model) {
             if (insertion_point->Func() == core::BuiltinFn::kTextureLoad ||
                 insertion_point->Func() == core::BuiltinFn::kTextureStore) {
                 if (auto* st = insertion_point->Args()[0]->Type()->As<spirv::type::Image>()) {
@@ -873,8 +960,8 @@ struct State {
         }
 
         // Call the function.
-        core::ir::Instruction* result =
-            b.Call<spirv::ir::BuiltinCall>(result_ty, function, std::move(function_args));
+        core::ir::Instruction* result = b.CallExplicit<spirv::ir::BuiltinCall>(
+            result_ty, function, Vector{ty.u32()}, std::move(function_args));
         result->InsertBefore(builtin);
 
         // Swizzle the first two components from the result for arrayed textures.
@@ -937,8 +1024,8 @@ struct State {
         }
 
         // Call the function.
-        auto* texture_call =
-            b.Call<spirv::ir::BuiltinCall>(ty.vec3<u32>(), function, std::move(function_args));
+        auto* texture_call = b.CallExplicit<spirv::ir::BuiltinCall>(
+            ty.vec3<u32>(), function, Vector{ty.u32()}, std::move(function_args));
         texture_call->InsertBefore(builtin);
 
         // Extract the third component to get the number of array layers.
@@ -1041,7 +1128,7 @@ struct State {
     /// @param builtin the builtin call instruction
     void SubgroupMatrixLoad(core::ir::CoreBuiltinCall* builtin) {
         b.InsertBefore(builtin, [&] {
-            auto* result_ty = builtin->Result()->Type();
+            auto* result_ty = builtin->Result()->Type()->As<core::type::SubgroupMatrix>();
             auto* p = builtin->Args()[0];
             auto* offset = builtin->Args()[1];
             auto* col_major = builtin->Args()[2]->As<core::ir::Constant>();
@@ -1059,9 +1146,21 @@ struct State {
                                               : SpvCooperativeMatrixLayoutRowMajorKHR));
             auto* memory_operand = Literal(u32(SpvMemoryAccessNonPrivatePointerMask));
 
+            // In SPIR-V `stride` is related to the type of the input pointer, while in WGSL
+            // `stride` means the number of elements between each row or column. When the subgroup
+            // matrix element type is `i8` or `u8`, and the input array type is `i32` or `u32`, we
+            // need to convert the `stride` in WGSL into the `stride` in SPIR-V by dividing the
+            // `stride` in WGSL with 4.
+            core::ir::Value* applied_stride = nullptr;
+            if (result_ty->Type()->Size() == 1u && arr->ElemType()->Size() == 4u) {
+                auto* binary = b.Binary(core::BinaryOp::kDivide, stride->Type(), stride, u32(4));
+                applied_stride = binary->Result()->As<core::ir::Value>();
+            } else {
+                applied_stride = stride;
+            }
             auto* call = b.CallWithResult<spirv::ir::BuiltinCall>(
                 builtin->DetachResult(), spirv::BuiltinFn::kCooperativeMatrixLoad, src, layout,
-                stride, memory_operand);
+                applied_stride, memory_operand);
             call->SetExplicitTemplateParams(Vector{result_ty});
         });
         builtin->Destroy();
@@ -1153,13 +1252,13 @@ struct State {
 
 }  // namespace
 
-Result<SuccessType> BuiltinPolyfill(core::ir::Module& ir, bool use_vulkan_memory_model) {
+Result<SuccessType> BuiltinPolyfill(core::ir::Module& ir, PolyfillConfig config) {
     auto result = ValidateAndDumpIfNeeded(ir, "spirv.BuiltinPolyfill");
     if (result != Success) {
         return result.Failure();
     }
 
-    State{ir, use_vulkan_memory_model}.Process();
+    State{ir, config}.Process();
 
     return Success;
 }

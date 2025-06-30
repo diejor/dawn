@@ -28,6 +28,7 @@
 #include "dawn/native/null/DeviceNull.h"
 
 #include <limits>
+#include <unordered_map>
 #include <utility>
 
 #include "dawn/native/BackendConnection.h"
@@ -46,13 +47,18 @@ namespace dawn::native::null {
 // Implementation of pre-Device objects: the null physical device, null backend connection and
 // Connect()
 
+Ref<PhysicalDevice> PhysicalDevice::Create() {
+    auto physicalDevice = AcquireRef(new PhysicalDevice());
+    MaybeError err = physicalDevice->Initialize();
+    DAWN_CHECK(err.IsSuccess());
+    return physicalDevice;
+}
+
 PhysicalDevice::PhysicalDevice() : PhysicalDeviceBase(wgpu::BackendType::Null) {
     mVendorId = 0;
     mDeviceId = 0;
     mName = "Null backend";
     mAdapterType = wgpu::AdapterType::CPU;
-    MaybeError err = Initialize();
-    DAWN_ASSERT(err.IsSuccess());
 }
 
 PhysicalDevice::~PhysicalDevice() = default;
@@ -88,9 +94,9 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
 }
 
 MaybeError PhysicalDevice::InitializeSupportedLimitsImpl(CombinedLimits* limits) {
-    GetDefaultLimitsForSupportedFeatureLevel(&limits->v1);
+    GetDefaultLimitsForSupportedFeatureLevel(limits);
     // Set the subgroups limit, as DeviceNull should support subgroups feature.
-    limits->experimentalImmediateDataLimits.maxImmediateDataRangeByteSize =
+    limits->v1.maxImmediateSize =
         kMaxExternalImmediateConstantsPerPipeline * kImmediateConstantElementByteSize;
     return {};
 }
@@ -110,10 +116,6 @@ ResultOrError<Ref<DeviceBase>> PhysicalDevice::CreateDeviceImpl(
 }
 
 void PhysicalDevice::PopulateBackendProperties(UnpackedPtr<AdapterInfo>& info) const {
-    if (auto* subgroupProperties = info.Get<AdapterPropertiesSubgroups>()) {
-        subgroupProperties->subgroupMinSize = 4;
-        subgroupProperties->subgroupMaxSize = 128;
-    }
     if (auto* memoryHeapProperties = info.Get<AdapterPropertiesMemoryHeaps>()) {
         auto* heapInfo = new MemoryHeapInfo[1];
         memoryHeapProperties->heapCount = 1;
@@ -147,7 +149,7 @@ class Backend : public BackendConnection {
         // There is always a single Null physical device because it is purely CPU based
         // and doesn't depend on the system.
         if (mPhysicalDevice == nullptr) {
-            mPhysicalDevice = AcquireRef(new PhysicalDevice());
+            mPhysicalDevice = PhysicalDevice::Create();
         }
         return {mPhysicalDevice};
     }
@@ -190,7 +192,8 @@ Device::~Device() {
 }
 
 MaybeError Device::Initialize(const UnpackedPtr<DeviceDescriptor>& descriptor) {
-    return DeviceBase::Initialize(AcquireRef(new Queue(this, &descriptor->defaultQueue)));
+    return DeviceBase::Initialize(descriptor,
+                                  AcquireRef(new Queue(this, &descriptor->defaultQueue)));
 }
 
 ResultOrError<Ref<BindGroupBase>> Device::CreateBindGroupImpl(
@@ -234,10 +237,9 @@ ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescripto
 ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
     const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
     const std::vector<tint::wgsl::Extension>& internalExtensions,
-    ShaderModuleParseResult* parseResult,
-    OwnedCompilationMessages* compilationMessages) {
+    ShaderModuleParseResult* parseResult) {
     Ref<ShaderModule> module = AcquireRef(new ShaderModule(this, descriptor, internalExtensions));
-    DAWN_TRY(module->Initialize(parseResult, compilationMessages));
+    DAWN_TRY(module->Initialize(parseResult));
     return module;
 }
 ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(Surface* surface,
@@ -275,11 +277,11 @@ void Device::ForgetPendingOperations() {
     mPendingOperations.clear();
 }
 
-MaybeError Device::CopyFromStagingToBufferImpl(BufferBase* source,
-                                               uint64_t sourceOffset,
-                                               BufferBase* destination,
-                                               uint64_t destinationOffset,
-                                               uint64_t size) {
+MaybeError Device::CopyFromStagingToBuffer(BufferBase* source,
+                                           uint64_t sourceOffset,
+                                           BufferBase* destination,
+                                           uint64_t destinationOffset,
+                                           uint64_t size) {
     if (IsToggleEnabled(Toggle::LazyClearResourceOnFirstUse)) {
         destination->SetInitialized(true);
     }
@@ -399,7 +401,7 @@ MaybeError Buffer::MapAsyncImpl(wgpu::MapMode mode, size_t offset, size_t size) 
     return {};
 }
 
-void* Buffer::GetMappedPointer() {
+void* Buffer::GetMappedPointerImpl() {
     return mBackingData.get();
 }
 
@@ -460,7 +462,7 @@ bool Queue::HasPendingCommands() const {
     return false;
 }
 
-MaybeError Queue::SubmitPendingCommands() {
+MaybeError Queue::SubmitPendingCommandsImpl() {
     return {};
 }
 
@@ -477,11 +479,6 @@ MaybeError Queue::WaitForIdleForDestruction() {
 MaybeError ComputePipeline::InitializeImpl() {
     const ProgrammableStage& computeStage = GetStage(SingleShaderStage::Compute);
 
-    std::optional<tint::ast::transform::SubstituteOverride::Config> substituteOverrideConfig;
-    if (!computeStage.metadata->overrides.empty()) {
-        substituteOverrideConfig = BuildSubstituteOverridesTransformConfig(computeStage);
-    }
-
     // Convert the AST program to an IR module.
     auto ir =
         tint::wgsl::reader::ProgramToLoweredIR(computeStage.module->GetTintProgram()->program);
@@ -494,17 +491,15 @@ MaybeError ComputePipeline::InitializeImpl() {
                     "Pipeline single entry point (IR) failed:\n%s",
                     singleEntryPointResult.Failure().reason);
 
-    if (substituteOverrideConfig) {
-        // this needs to run after SingleEntryPoint transform which removes unused
-        // overrides for the current entry point.
-        tint::core::ir::transform::SubstituteOverridesConfig cfg;
-        cfg.map = substituteOverrideConfig->map;
-        auto substituteOverridesResult =
-            tint::core::ir::transform::SubstituteOverrides(ir.Get(), cfg);
-        DAWN_INVALID_IF(substituteOverridesResult != tint::Success,
-                        "Pipeline override substitution (IR) failed:\n%s",
-                        substituteOverridesResult.Failure().reason);
-    }
+    // this needs to run after SingleEntryPoint transform which removes unused
+    // overrides for the current entry point.
+    tint::core::ir::transform::SubstituteOverridesConfig cfg;
+    cfg.map = BuildSubstituteOverridesTransformConfig(computeStage);
+
+    auto substituteOverridesResult = tint::core::ir::transform::SubstituteOverrides(ir.Get(), cfg);
+    DAWN_INVALID_IF(substituteOverridesResult != tint::Success,
+                    "Pipeline override substitution (IR) failed:\n%s",
+                    substituteOverridesResult.Failure().reason);
 
     auto limits = LimitsForCompilationRequest::Create(GetDevice()->GetLimits().v1);
     auto adapterSupportedLimits =
@@ -581,9 +576,8 @@ void SwapChain::DetachFromSurfaceImpl() {
 
 // ShaderModule
 
-MaybeError ShaderModule::Initialize(ShaderModuleParseResult* parseResult,
-                                    OwnedCompilationMessages* compilationMessages) {
-    return InitializeBase(parseResult, compilationMessages);
+MaybeError ShaderModule::Initialize(ShaderModuleParseResult* parseResult) {
+    return InitializeBase(parseResult);
 }
 
 uint32_t Device::GetOptimalBytesPerRowAlignment() const {

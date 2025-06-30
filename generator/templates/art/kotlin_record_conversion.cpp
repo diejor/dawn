@@ -1,29 +1,29 @@
-//* Copyright 2024 The Dawn & Tint Authors
-//*
-//* Redistribution and use in source and binary forms, with or without
-//* modification, are permitted provided that the following conditions are met:
-//*
-//* 1. Redistributions of source code must retain the above copyright notice, this
-//*    list of conditions and the following disclaimer.
-//*
-//* 2. Redistributions in binary form must reproduce the above copyright notice,
-//*    this list of conditions and the following disclaimer in the documentation
-//*    and/or other materials provided with the distribution.
-//*
-//* 3. Neither the name of the copyright holder nor the names of its
-//*    contributors may be used to endorse or promote products derived from
-//*    this software without specific prior written permission.
-//*
-//* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-//* AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-//* IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-//* DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-//* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-//* DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-//* SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-//* CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-//* OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-//* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Copyright 2024 The Dawn & Tint Authors
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 {% from 'art/api_jni_types.cpp' import arg_to_jni_type, convert_to_kotlin, jni_signature with context %}
 
 {% macro define_kotlin_record_structure(struct_name, members) %}
@@ -44,6 +44,7 @@
 {% macro define_kotlin_to_struct_conversion(function_name, kotlin_name, struct_name, members) %}
     inline void {{function_name}}(JNIContext* c, const {{kotlin_name}}& inStruct, {{struct_name}}* outStruct) {
         JNIEnv* env = c->env;
+        JNIClasses* classes = JNIClasses::getInstance(env);
         *outStruct = {};
 
         {% for member in kotlin_record_members(members) %}
@@ -82,7 +83,7 @@
                         out = array;
 
                         {% if member.type.category in ['bitmask', 'enum'] %}
-                            jclass memberClass = env->FindClass("{{ jni_name(member.type) }}");
+                            jclass memberClass = classes->{{ member.type.name.camelCase() }};
                             jmethodID getValue = env->GetMethodID(memberClass, "getValue", "()I");
                             for (int idx = 0; idx != outLength; idx++) {
                                 jobject element = env->GetObjectArrayElement(in, idx);
@@ -90,7 +91,7 @@
                                         env->CallIntMethod(element, getValue));
                             }
                         {% elif member.type.category == 'object' %}
-                            jclass memberClass = env->FindClass("{{ jni_name(member.type) }}");
+                            jclass memberClass = classes->{{ member.type.name.camelCase() }};
                             jmethodID getHandle = env->GetMethodID(memberClass, "getHandle", "()J");
                             for (int idx = 0; idx != outLength; idx++) {
                                 jobject element = env->GetObjectArrayElement(in, idx);
@@ -108,7 +109,7 @@
                 //* From here members are single values.
                 {% elif member.type.category == 'object' %}
                     if (in != nullptr) {
-                        jclass memberClass = env->FindClass("{{ jni_name(member.type) }}");
+                        jclass memberClass = classes->{{ member.type.name.camelCase() }};
                         jmethodID getHandle = env->GetMethodID(memberClass, "getHandle", "()J");
                         out = reinterpret_cast<{{as_cType(member.type.name)}}>(
                                 env->CallLongMethod(in, getHandle));
@@ -146,10 +147,19 @@
                         //* User data is used to carry the JNI context (env) for use by the
                         //* callback.
                         UserData* userData1 = static_cast<UserData *>({{ userdata }});
-                        JNIEnv *env = userData1->env;
+                        JNIEnv *env = NULL;
+                        JavaVM* jvm = userData1->jvm;
+                        //* Deal with difference in signatures between Oracle's jni.h and Android's.
+                        #ifdef _JAVASOFT_JNI_H_  //* Oracle's jni.h violates the JNI spec.
+                            jvm->AttachCurrentThread(reinterpret_cast<void**>(&env), NULL);
+                        #else
+                            jvm->AttachCurrentThread(&env, NULL);
+                        #endif
+
                         if (env->ExceptionCheck()) {
                             return;
                         }
+                        JNIClasses* classes = JNIClasses::getInstance(env);
 
                         {% for callbackArg in kotlin_record_members(member.type.arguments) -%}
                             {{ convert_to_kotlin(callbackArg.name.camelCase(),
@@ -160,7 +170,7 @@
 
                         //* Get the client (Kotlin) callback so we can call it.
                         jmethodID callbackMethod = env->GetMethodID(
-                                env->FindClass("{{ jni_name(member.type) }}"), "callback", "(
+                                classes->{{ member.type.name.camelCase() }}, "callback", "(
                             {%- for callbackArg in kotlin_record_members(member.type.arguments) -%}
                                 {{- jni_signature(callbackArg) -}}
                             {%- endfor %})V");
@@ -173,7 +183,7 @@
                     };
                     //* TODO(b/330293719): free associated resources.
                     outStruct->{{ userdata }} = new UserData(
-                            {.env = env, .callback = env->NewGlobalRef(in)});
+                            {.callback = env->NewGlobalRef(in), .jvm = c->jvm});
 
                 {% else %}
                     {{ unreachable_code() }}

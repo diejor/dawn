@@ -1,7 +1,17 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
+struct VertexOutput {
+  float4 pos;
+  vector<float16_t, 2> prevent_dce;
+};
 
+struct vertex_main_outputs {
+  nointerpolation vector<float16_t, 2> VertexOutput_prevent_dce : TEXCOORD0;
+  float4 VertexOutput_pos : SV_Position;
+};
+
+
+RWByteAddressBuffer prevent_dce : register(u0);
 vector<float16_t, 2> abs_5ae4fe() {
   vector<float16_t, 2> res = (float16_t(1.0h)).xx;
   return res;
@@ -9,40 +19,31 @@ vector<float16_t, 2> abs_5ae4fe() {
 
 void fragment_main() {
   prevent_dce.Store<vector<float16_t, 2> >(0u, abs_5ae4fe());
-  return;
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
   prevent_dce.Store<vector<float16_t, 2> >(0u, abs_5ae4fe());
-  return;
 }
-
-struct VertexOutput {
-  float4 pos;
-  vector<float16_t, 2> prevent_dce;
-};
-struct tint_symbol_1 {
-  nointerpolation vector<float16_t, 2> prevent_dce : TEXCOORD0;
-  float4 pos : SV_Position;
-};
 
 VertexOutput vertex_main_inner() {
   VertexOutput tint_symbol = (VertexOutput)0;
   tint_symbol.pos = (0.0f).xxxx;
   tint_symbol.prevent_dce = abs_5ae4fe();
-  return tint_symbol;
+  VertexOutput v = tint_symbol;
+  return v;
 }
 
-tint_symbol_1 vertex_main() {
-  VertexOutput inner_result = vertex_main_inner();
-  tint_symbol_1 wrapper_result = (tint_symbol_1)0;
-  wrapper_result.pos = inner_result.pos;
-  wrapper_result.prevent_dce = inner_result.prevent_dce;
-  return wrapper_result;
+vertex_main_outputs vertex_main() {
+  VertexOutput v_1 = vertex_main_inner();
+  VertexOutput v_2 = v_1;
+  VertexOutput v_3 = v_1;
+  vertex_main_outputs v_4 = {v_3.prevent_dce, v_2.pos};
+  return v_4;
 }
+
 FXC validation failure:
-<scrubbed_path>(3,8-16): error X3000: syntax error: unexpected token 'float16_t'
+<scrubbed_path>(3,10-18): error X3000: syntax error: unexpected token 'float16_t'
 
 
 tint executable returned error: exit status 1

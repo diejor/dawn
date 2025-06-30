@@ -595,10 +595,14 @@ TEST_P(ShaderRobustnessPerf, Run) {
 }
 
 DAWN_INSTANTIATE_TEST_P(ShaderRobustnessPerf,
-                        {D3D12Backend(), D3D12Backend({"disable_robustness"}, {}), MetalBackend(),
-                         MetalBackend({"disable_robustness"}, {}), OpenGLBackend(),
-                         OpenGLBackend({"disable_robustness"}, {}), VulkanBackend(),
-                         VulkanBackend({"disable_robustness"}, {})},
+                        {D3D12Backend({"disable_robustness"}, {}),
+                         D3D12Backend({"enable_integer_range_analysis_in_robustness"}, {}),
+                         MetalBackend(), MetalBackend({"disable_robustness"}, {}),
+                         MetalBackend({"enable_integer_range_analysis_in_robustness"}, {}),
+                         OpenGLBackend(), OpenGLBackend({"disable_robustness"}, {}),
+                         OpenGLBackend({"enable_integer_range_analysis_in_robustness"}, {}),
+                         VulkanBackend(), VulkanBackend({"disable_robustness"}, {}),
+                         VulkanBackend({"enable_integer_range_analysis_in_robustness"}, {})},
                         {MatMulMethod::MatMulFloatOneDimSharedArray,
                          MatMulMethod::MatMulFloatTwoDimSharedArray,
                          MatMulMethod::MatMulVec4OneDimSharedArray,

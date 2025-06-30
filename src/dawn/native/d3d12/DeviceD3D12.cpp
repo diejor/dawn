@@ -176,7 +176,7 @@ MaybeError Device::Initialize(const UnpackedPtr<DeviceDescriptor>& descriptor) {
     GetD3D12Device()->CreateCommandSignature(&programDesc, nullptr,
                                              IID_PPV_ARGS(&mDrawIndexedIndirectSignature));
 
-    DAWN_TRY(DeviceBase::Initialize(std::move(queue)));
+    DAWN_TRY(DeviceBase::Initialize(descriptor, std::move(queue)));
 
     // Ensure DXC if use_dxc toggle is set.
     DAWN_TRY(EnsureDXCIfRequired());
@@ -395,10 +395,8 @@ ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescripto
 ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
     const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
     const std::vector<tint::wgsl::Extension>& internalExtensions,
-    ShaderModuleParseResult* parseResult,
-    OwnedCompilationMessages* compilationMessages) {
-    return ShaderModule::Create(this, descriptor, internalExtensions, parseResult,
-                                compilationMessages);
+    ShaderModuleParseResult* parseResult) {
+    return ShaderModule::Create(this, descriptor, internalExtensions, parseResult);
 }
 ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(Surface* surface,
                                                               SwapChainBase* previousSwapChain,
@@ -484,16 +482,16 @@ ResultOrError<Ref<SharedFenceBase>> Device::ImportSharedFenceImpl(
     }
 }
 
-MaybeError Device::CopyFromStagingToBufferImpl(BufferBase* source,
-                                               uint64_t sourceOffset,
-                                               BufferBase* destination,
-                                               uint64_t destinationOffset,
-                                               uint64_t size) {
+MaybeError Device::CopyFromStagingToBuffer(BufferBase* source,
+                                           uint64_t sourceOffset,
+                                           BufferBase* destination,
+                                           uint64_t destinationOffset,
+                                           uint64_t size) {
     CommandRecordingContext* commandRecordingContext =
         ToBackend(GetQueue())->GetPendingCommandContext(QueueBase::SubmitMode::Passive);
 
     Buffer* dstBuffer = ToBackend(destination);
-    DAWN_TRY(dstBuffer->SynchronizeBufferBeforeUse());
+    DAWN_TRY(dstBuffer->SynchronizeBufferBeforeUseOnGPU());
 
     [[maybe_unused]] bool cleared;
     DAWN_TRY_ASSIGN(cleared, dstBuffer->EnsureDataInitializedAsDestination(

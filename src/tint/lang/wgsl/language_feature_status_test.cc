@@ -27,8 +27,8 @@
 
 #include <gtest/gtest.h>
 
-#include "src/tint/lang/wgsl/features/language_feature.h"
-#include "src/tint/lang/wgsl/features/status.h"
+#include "src/tint/lang/wgsl/enums.h"
+#include "src/tint/lang/wgsl/feature_status.h"
 
 namespace tint::wgsl {
 namespace {

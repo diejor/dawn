@@ -1,7 +1,7 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
 
+RWByteAddressBuffer prevent_dce : register(u0);
 uint3 quadSwapY_06a67c() {
   uint3 arg_0 = (1u).xxx;
   uint3 res = QuadReadAcrossY(arg_0);
@@ -9,15 +9,14 @@ uint3 quadSwapY_06a67c() {
 }
 
 void fragment_main() {
-  prevent_dce.Store3(0u, asuint(quadSwapY_06a67c()));
-  return;
+  prevent_dce.Store3(0u, quadSwapY_06a67c());
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
-  prevent_dce.Store3(0u, asuint(quadSwapY_06a67c()));
-  return;
+  prevent_dce.Store3(0u, quadSwapY_06a67c());
 }
+
 FXC validation failure:
 <scrubbed_path>(5,15-36): error X3004: undeclared identifier 'QuadReadAcrossY'
 

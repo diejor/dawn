@@ -1,7 +1,7 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
 
+RWByteAddressBuffer prevent_dce : register(u0);
 float2 subgroupMin_2d8828() {
   float2 res = WaveActiveMin((1.0f).xx);
   return res;
@@ -9,14 +9,13 @@ float2 subgroupMin_2d8828() {
 
 void fragment_main() {
   prevent_dce.Store2(0u, asuint(subgroupMin_2d8828()));
-  return;
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
   prevent_dce.Store2(0u, asuint(subgroupMin_2d8828()));
-  return;
 }
+
 FXC validation failure:
 <scrubbed_path>(4,16-39): error X3004: undeclared identifier 'WaveActiveMin'
 

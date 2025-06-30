@@ -3,96 +3,112 @@ SKIP: INVALID
 struct Inner {
   matrix<float16_t, 3, 3> m;
 };
+
 struct Outer {
   Inner a[4];
 };
 
+
 cbuffer cbuffer_a : register(b0) {
   uint4 a[64];
 };
-static int counter = 0;
-
+static int counter = int(0);
 int i() {
-  counter = (counter + 1);
+  counter = (counter + int(1));
   return counter;
 }
 
-matrix<float16_t, 3, 3> a_load_4(uint offset) {
-  const uint scalar_offset = ((offset + 0u)) / 4;
-  uint4 ubo_load_1 = a[scalar_offset / 4];
-  uint2 ubo_load = ((scalar_offset & 2) ? ubo_load_1.zw : ubo_load_1.xy);
-  vector<float16_t, 2> ubo_load_xz = vector<float16_t, 2>(f16tof32(ubo_load & 0xFFFF));
-  float16_t ubo_load_y = f16tof32(ubo_load[0] >> 16);
-  const uint scalar_offset_1 = ((offset + 8u)) / 4;
-  uint4 ubo_load_3 = a[scalar_offset_1 / 4];
-  uint2 ubo_load_2 = ((scalar_offset_1 & 2) ? ubo_load_3.zw : ubo_load_3.xy);
-  vector<float16_t, 2> ubo_load_2_xz = vector<float16_t, 2>(f16tof32(ubo_load_2 & 0xFFFF));
-  float16_t ubo_load_2_y = f16tof32(ubo_load_2[0] >> 16);
-  const uint scalar_offset_2 = ((offset + 16u)) / 4;
-  uint4 ubo_load_5 = a[scalar_offset_2 / 4];
-  uint2 ubo_load_4 = ((scalar_offset_2 & 2) ? ubo_load_5.zw : ubo_load_5.xy);
-  vector<float16_t, 2> ubo_load_4_xz = vector<float16_t, 2>(f16tof32(ubo_load_4 & 0xFFFF));
-  float16_t ubo_load_4_y = f16tof32(ubo_load_4[0] >> 16);
-  return matrix<float16_t, 3, 3>(vector<float16_t, 3>(ubo_load_xz[0], ubo_load_y, ubo_load_xz[1]), vector<float16_t, 3>(ubo_load_2_xz[0], ubo_load_2_y, ubo_load_2_xz[1]), vector<float16_t, 3>(ubo_load_4_xz[0], ubo_load_4_y, ubo_load_4_xz[1]));
+vector<float16_t, 4> tint_bitcast_to_f16(uint4 src) {
+  uint4 v = src;
+  uint4 mask = (65535u).xxxx;
+  uint4 shift = (16u).xxxx;
+  float4 t_low = f16tof32((v & mask));
+  float4 t_high = f16tof32(((v >> shift) & mask));
+  float16_t v_1 = float16_t(t_low.x);
+  float16_t v_2 = float16_t(t_high.x);
+  float16_t v_3 = float16_t(t_low.y);
+  return vector<float16_t, 4>(v_1, v_2, v_3, float16_t(t_high.y));
 }
 
-Inner a_load_3(uint offset) {
-  Inner tint_symbol_4 = {a_load_4((offset + 0u))};
-  return tint_symbol_4;
+matrix<float16_t, 3, 3> v_4(uint start_byte_offset) {
+  vector<float16_t, 3> v_5 = tint_bitcast_to_f16(a[(start_byte_offset / 16u)]).xyz;
+  vector<float16_t, 3> v_6 = tint_bitcast_to_f16(a[((8u + start_byte_offset) / 16u)]).xyz;
+  return matrix<float16_t, 3, 3>(v_5, v_6, tint_bitcast_to_f16(a[((16u + start_byte_offset) / 16u)]).xyz);
 }
 
-typedef Inner a_load_2_ret[4];
-a_load_2_ret a_load_2(uint offset) {
-  Inner arr[4] = (Inner[4])0;
+Inner v_7(uint start_byte_offset) {
+  Inner v_8 = {v_4(start_byte_offset)};
+  return v_8;
+}
+
+typedef Inner ary_ret[4];
+ary_ret v_9(uint start_byte_offset) {
+  Inner a[4] = (Inner[4])0;
   {
-    for(uint i_1 = 0u; (i_1 < 4u); i_1 = (i_1 + 1u)) {
-      arr[i_1] = a_load_3((offset + (i_1 * 64u)));
+    uint v_10 = 0u;
+    v_10 = 0u;
+    while(true) {
+      uint v_11 = v_10;
+      if ((v_11 >= 4u)) {
+        break;
+      }
+      Inner v_12 = v_7((start_byte_offset + (v_11 * 64u)));
+      a[v_11] = v_12;
+      {
+        v_10 = (v_11 + 1u);
+      }
+      continue;
     }
   }
-  return arr;
+  Inner v_13[4] = a;
+  return v_13;
 }
 
-Outer a_load_1(uint offset) {
-  Outer tint_symbol_5 = {a_load_2((offset + 0u))};
-  return tint_symbol_5;
+Outer v_14(uint start_byte_offset) {
+  Inner v_15[4] = v_9(start_byte_offset);
+  Outer v_16 = {v_15};
+  return v_16;
 }
 
-typedef Outer a_load_ret[4];
-a_load_ret a_load(uint offset) {
-  Outer arr_1[4] = (Outer[4])0;
+typedef Outer ary_ret_1[4];
+ary_ret_1 v_17(uint start_byte_offset) {
+  Outer a[4] = (Outer[4])0;
   {
-    for(uint i_2 = 0u; (i_2 < 4u); i_2 = (i_2 + 1u)) {
-      arr_1[i_2] = a_load_1((offset + (i_2 * 256u)));
+    uint v_18 = 0u;
+    v_18 = 0u;
+    while(true) {
+      uint v_19 = v_18;
+      if ((v_19 >= 4u)) {
+        break;
+      }
+      Outer v_20 = v_14((start_byte_offset + (v_19 * 256u)));
+      a[v_19] = v_20;
+      {
+        v_18 = (v_19 + 1u);
+      }
+      continue;
     }
   }
-  return arr_1;
+  Outer v_21[4] = a;
+  return v_21;
 }
 
 [numthreads(1, 1, 1)]
 void f() {
-  int p_a_i_save = i();
-  int p_a_i_a_i_save = i();
-  int p_a_i_a_i_m_i_save = i();
-  Outer l_a[4] = a_load(0u);
-  Outer l_a_i = a_load_1((256u * uint(p_a_i_save)));
-  Inner l_a_i_a[4] = a_load_2((256u * uint(p_a_i_save)));
-  Inner l_a_i_a_i = a_load_3(((256u * uint(p_a_i_save)) + (64u * uint(p_a_i_a_i_save))));
-  matrix<float16_t, 3, 3> l_a_i_a_i_m = a_load_4(((256u * uint(p_a_i_save)) + (64u * uint(p_a_i_a_i_save))));
-  const uint scalar_offset_3 = ((((256u * uint(p_a_i_save)) + (64u * uint(p_a_i_a_i_save))) + (8u * uint(p_a_i_a_i_m_i_save)))) / 4;
-  uint4 ubo_load_7 = a[scalar_offset_3 / 4];
-  uint2 ubo_load_6 = ((scalar_offset_3 & 2) ? ubo_load_7.zw : ubo_load_7.xy);
-  vector<float16_t, 2> ubo_load_6_xz = vector<float16_t, 2>(f16tof32(ubo_load_6 & 0xFFFF));
-  float16_t ubo_load_6_y = f16tof32(ubo_load_6[0] >> 16);
-  vector<float16_t, 3> l_a_i_a_i_m_i = vector<float16_t, 3>(ubo_load_6_xz[0], ubo_load_6_y, ubo_load_6_xz[1]);
-  int tint_symbol = p_a_i_save;
-  int tint_symbol_1 = p_a_i_a_i_save;
-  int tint_symbol_2 = p_a_i_a_i_m_i_save;
-  int tint_symbol_3 = i();
-  const uint scalar_offset_bytes = (((((256u * uint(tint_symbol)) + (64u * uint(tint_symbol_1))) + (8u * uint(tint_symbol_2))) + (2u * uint(tint_symbol_3))));
-  const uint scalar_offset_index = scalar_offset_bytes / 4;
-  float16_t l_a_i_a_i_m_i_i = float16_t(f16tof32(((a[scalar_offset_index / 4][scalar_offset_index % 4] >> (scalar_offset_bytes % 4 == 0 ? 0 : 16)) & 0xFFFF)));
-  return;
+  uint v_22 = (256u * uint(i()));
+  uint v_23 = (64u * uint(i()));
+  uint v_24 = (8u * uint(i()));
+  Outer l_a[4] = v_17(0u);
+  Outer l_a_i = v_14(v_22);
+  Inner l_a_i_a[4] = v_9(v_22);
+  Inner l_a_i_a_i = v_7((v_22 + v_23));
+  matrix<float16_t, 3, 3> l_a_i_a_i_m = v_4((v_22 + v_23));
+  vector<float16_t, 3> l_a_i_a_i_m_i = tint_bitcast_to_f16(a[(((v_22 + v_23) + v_24) / 16u)]).xyz;
+  uint v_25 = (((v_22 + v_23) + v_24) + (uint(i()) * 2u));
+  uint v_26 = a[(v_25 / 16u)][((v_25 % 16u) / 4u)];
+  float16_t l_a_i_a_i_m_i_i = float16_t(f16tof32((v_26 >> ((((v_25 % 4u) == 0u)) ? (0u) : (16u)))));
 }
+
 FXC validation failure:
 <scrubbed_path>(2,10-18): error X3000: syntax error: unexpected token 'float16_t'
 

@@ -1,7 +1,7 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
 
+RWByteAddressBuffer prevent_dce : register(u0);
 uint subgroupShuffle_f194f5() {
   uint arg_0 = 1u;
   uint arg_1 = 1u;
@@ -10,15 +10,14 @@ uint subgroupShuffle_f194f5() {
 }
 
 void fragment_main() {
-  prevent_dce.Store(0u, asuint(subgroupShuffle_f194f5()));
-  return;
+  prevent_dce.Store(0u, subgroupShuffle_f194f5());
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
-  prevent_dce.Store(0u, asuint(subgroupShuffle_f194f5()));
-  return;
+  prevent_dce.Store(0u, subgroupShuffle_f194f5());
 }
+
 FXC validation failure:
 <scrubbed_path>(6,14-41): error X3004: undeclared identifier 'WaveReadLaneAt'
 

@@ -10,35 +10,38 @@ struct FragmentOutputs {
   float16_t loc4;
   vector<float16_t, 3> loc5;
 };
-struct tint_symbol {
-  int loc0 : SV_Target0;
-  uint loc1 : SV_Target1;
-  float loc2 : SV_Target2;
-  float4 loc3 : SV_Target3;
-  float16_t loc4 : SV_Target4;
-  vector<float16_t, 3> loc5 : SV_Target5;
-  float frag_depth : SV_Depth;
-  uint sample_mask : SV_Coverage;
+
+struct main_outputs {
+  int FragmentOutputs_loc0 : SV_Target0;
+  uint FragmentOutputs_loc1 : SV_Target1;
+  float FragmentOutputs_loc2 : SV_Target2;
+  float4 FragmentOutputs_loc3 : SV_Target3;
+  float16_t FragmentOutputs_loc4 : SV_Target4;
+  vector<float16_t, 3> FragmentOutputs_loc5 : SV_Target5;
+  float FragmentOutputs_frag_depth : SV_Depth;
+  uint FragmentOutputs_sample_mask : SV_Coverage;
 };
 
+
 FragmentOutputs main_inner() {
-  FragmentOutputs tint_symbol_1 = {1, 2.0f, 1u, 1.0f, 2u, float4(1.0f, 2.0f, 3.0f, 4.0f), float16_t(2.25h), vector<float16_t, 3>(float16_t(3.0h), float16_t(5.0h), float16_t(8.0h))};
-  return tint_symbol_1;
+  FragmentOutputs v = {int(1), 2.0f, 1u, 1.0f, 2u, float4(1.0f, 2.0f, 3.0f, 4.0f), float16_t(2.25h), vector<float16_t, 3>(float16_t(3.0h), float16_t(5.0h), float16_t(8.0h))};
+  return v;
 }
 
-tint_symbol main() {
-  FragmentOutputs inner_result = main_inner();
-  tint_symbol wrapper_result = (tint_symbol)0;
-  wrapper_result.loc0 = inner_result.loc0;
-  wrapper_result.frag_depth = inner_result.frag_depth;
-  wrapper_result.loc1 = inner_result.loc1;
-  wrapper_result.loc2 = inner_result.loc2;
-  wrapper_result.sample_mask = inner_result.sample_mask;
-  wrapper_result.loc3 = inner_result.loc3;
-  wrapper_result.loc4 = inner_result.loc4;
-  wrapper_result.loc5 = inner_result.loc5;
-  return wrapper_result;
+main_outputs main() {
+  FragmentOutputs v_1 = main_inner();
+  FragmentOutputs v_2 = v_1;
+  FragmentOutputs v_3 = v_1;
+  FragmentOutputs v_4 = v_1;
+  FragmentOutputs v_5 = v_1;
+  FragmentOutputs v_6 = v_1;
+  FragmentOutputs v_7 = v_1;
+  FragmentOutputs v_8 = v_1;
+  FragmentOutputs v_9 = v_1;
+  main_outputs v_10 = {v_2.loc0, v_4.loc1, v_5.loc2, v_7.loc3, v_8.loc4, v_9.loc5, v_3.frag_depth, v_6.sample_mask};
+  return v_10;
 }
+
 FXC validation failure:
 <scrubbed_path>(8,3-11): error X3000: unrecognized identifier 'float16_t'
 

@@ -1,45 +1,54 @@
 SKIP: FAILED
 
+
 cbuffer cbuffer_u : register(b0) {
   uint4 u[1];
 };
-
 int f() {
-  return 0;
+  return int(0);
 }
 
 void g() {
-  int j = 0;
-  while (true) {
-    if ((j >= 1)) {
-      break;
+  int j = int(0);
+  {
+    while(true) {
+      if ((j >= int(1))) {
+        break;
+      }
+      j = (j + int(1));
+      int k = f();
+      {
+      }
+      continue;
     }
-    j = (j + 1);
-    int k = f();
   }
 }
 
 [numthreads(1, 1, 1)]
 void main() {
-  switch(asint(u[0].x)) {
-    case 0: {
-      switch(asint(u[0].x)) {
-        case 0: {
+  switch(asint(u[0u].x)) {
+    case int(0):
+    {
+      switch(asint(u[0u].x)) {
+        case int(0):
+        {
           break;
         }
-        default: {
+        default:
+        {
           g();
           break;
         }
       }
       break;
     }
-    default: {
+    default:
+    {
       break;
     }
   }
-  return;
 }
+
 FXC validation failure:
 internal error: no storage type for block output
 

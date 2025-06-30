@@ -1,70 +1,86 @@
 SKIP: INVALID
 
-groupshared matrix<float16_t, 2, 3> w[4];
+struct f_inputs {
+  uint tint_local_index : SV_GroupIndex;
+};
 
-void tint_zero_workgroup_memory(uint local_idx) {
-  {
-    for(uint idx = local_idx; (idx < 4u); idx = (idx + 1u)) {
-      uint i = idx;
-      w[i] = matrix<float16_t, 2, 3>((float16_t(0.0h)).xxx, (float16_t(0.0h)).xxx);
-    }
-  }
-  GroupMemoryBarrierWithGroupSync();
-}
 
 cbuffer cbuffer_u : register(b0) {
   uint4 u[4];
 };
 RWByteAddressBuffer s : register(u1);
-
-struct tint_symbol_1 {
-  uint local_invocation_index : SV_GroupIndex;
-};
-
-matrix<float16_t, 2, 3> u_load_1(uint offset) {
-  const uint scalar_offset = ((offset + 0u)) / 4;
-  uint4 ubo_load_1 = u[scalar_offset / 4];
-  uint2 ubo_load = ((scalar_offset & 2) ? ubo_load_1.zw : ubo_load_1.xy);
-  vector<float16_t, 2> ubo_load_xz = vector<float16_t, 2>(f16tof32(ubo_load & 0xFFFF));
-  float16_t ubo_load_y = f16tof32(ubo_load[0] >> 16);
-  const uint scalar_offset_1 = ((offset + 8u)) / 4;
-  uint4 ubo_load_3 = u[scalar_offset_1 / 4];
-  uint2 ubo_load_2 = ((scalar_offset_1 & 2) ? ubo_load_3.zw : ubo_load_3.xy);
-  vector<float16_t, 2> ubo_load_2_xz = vector<float16_t, 2>(f16tof32(ubo_load_2 & 0xFFFF));
-  float16_t ubo_load_2_y = f16tof32(ubo_load_2[0] >> 16);
-  return matrix<float16_t, 2, 3>(vector<float16_t, 3>(ubo_load_xz[0], ubo_load_y, ubo_load_xz[1]), vector<float16_t, 3>(ubo_load_2_xz[0], ubo_load_2_y, ubo_load_2_xz[1]));
+groupshared matrix<float16_t, 2, 3> w[4];
+vector<float16_t, 4> tint_bitcast_to_f16(uint4 src) {
+  uint4 v = src;
+  uint4 mask = (65535u).xxxx;
+  uint4 shift = (16u).xxxx;
+  float4 t_low = f16tof32((v & mask));
+  float4 t_high = f16tof32(((v >> shift) & mask));
+  float16_t v_1 = float16_t(t_low.x);
+  float16_t v_2 = float16_t(t_high.x);
+  float16_t v_3 = float16_t(t_low.y);
+  return vector<float16_t, 4>(v_1, v_2, v_3, float16_t(t_high.y));
 }
 
-typedef matrix<float16_t, 2, 3> u_load_ret[4];
-u_load_ret u_load(uint offset) {
-  matrix<float16_t, 2, 3> arr[4] = (matrix<float16_t, 2, 3>[4])0;
+matrix<float16_t, 2, 3> v_4(uint start_byte_offset) {
+  vector<float16_t, 3> v_5 = tint_bitcast_to_f16(u[(start_byte_offset / 16u)]).xyz;
+  return matrix<float16_t, 2, 3>(v_5, tint_bitcast_to_f16(u[((8u + start_byte_offset) / 16u)]).xyz);
+}
+
+typedef matrix<float16_t, 2, 3> ary_ret[4];
+ary_ret v_6(uint start_byte_offset) {
+  matrix<float16_t, 2, 3> a[4] = (matrix<float16_t, 2, 3>[4])0;
   {
-    for(uint i_1 = 0u; (i_1 < 4u); i_1 = (i_1 + 1u)) {
-      arr[i_1] = u_load_1((offset + (i_1 * 16u)));
+    uint v_7 = 0u;
+    v_7 = 0u;
+    while(true) {
+      uint v_8 = v_7;
+      if ((v_8 >= 4u)) {
+        break;
+      }
+      a[v_8] = v_4((start_byte_offset + (v_8 * 16u)));
+      {
+        v_7 = (v_8 + 1u);
+      }
+      continue;
     }
   }
-  return arr;
+  matrix<float16_t, 2, 3> v_9[4] = a;
+  return v_9;
 }
 
-void f_inner(uint local_invocation_index) {
-  tint_zero_workgroup_memory(local_invocation_index);
-  w = u_load(0u);
-  w[1] = u_load_1(32u);
-  uint2 ubo_load_4 = u[0].zw;
-  vector<float16_t, 2> ubo_load_4_xz = vector<float16_t, 2>(f16tof32(ubo_load_4 & 0xFFFF));
-  float16_t ubo_load_4_y = f16tof32(ubo_load_4[0] >> 16);
-  w[1][0] = vector<float16_t, 3>(ubo_load_4_xz[0], ubo_load_4_y, ubo_load_4_xz[1]).zxy;
-  w[1][0].x = float16_t(f16tof32(((u[0].z) & 0xFFFF)));
-  s.Store<float16_t>(0u, w[1][0].x);
+void f_inner(uint tint_local_index) {
+  {
+    uint v_10 = 0u;
+    v_10 = tint_local_index;
+    while(true) {
+      uint v_11 = v_10;
+      if ((v_11 >= 4u)) {
+        break;
+      }
+      w[v_11] = matrix<float16_t, 2, 3>((float16_t(0.0h)).xxx, (float16_t(0.0h)).xxx);
+      {
+        v_10 = (v_11 + 1u);
+      }
+      continue;
+    }
+  }
+  GroupMemoryBarrierWithGroupSync();
+  matrix<float16_t, 2, 3> v_12[4] = v_6(0u);
+  w = v_12;
+  w[int(1)] = v_4(32u);
+  w[int(1)][int(0)] = tint_bitcast_to_f16(u[0u]).xyz.zxy;
+  w[int(1)][int(0)][0u] = float16_t(f16tof32(u[0u].z));
+  s.Store<float16_t>(0u, w[int(1)][int(0)].x);
 }
 
 [numthreads(1, 1, 1)]
-void f(tint_symbol_1 tint_symbol) {
-  f_inner(tint_symbol.local_invocation_index);
-  return;
+void f(f_inputs inputs) {
+  f_inner(inputs.tint_local_index);
 }
+
 FXC validation failure:
-<scrubbed_path>(1,20-28): error X3000: syntax error: unexpected token 'float16_t'
+<scrubbed_path>(10,20-28): error X3000: syntax error: unexpected token 'float16_t'
 
 
 tint executable returned error: exit status 1

@@ -1,20 +1,25 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
 
+RWByteAddressBuffer prevent_dce : register(u0);
 int2 subgroupInclusiveAdd_fabbde() {
-  int2 arg_0 = (1).xx;
-  int2 res = (WavePrefixSum(arg_0) + arg_0);
+  int2 arg_0 = (int(1)).xx;
+  int2 v = arg_0;
+  int2 res = (WavePrefixSum(v) + v);
   return res;
 }
 
 void fragment_main() {
   prevent_dce.Store2(0u, asuint(subgroupInclusiveAdd_fabbde()));
-  return;
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
   prevent_dce.Store2(0u, asuint(subgroupInclusiveAdd_fabbde()));
-  return;
 }
+
+FXC validation failure:
+<scrubbed_path>(6,15-30): error X3004: undeclared identifier 'WavePrefixSum'
+
+
+tint executable returned error: exit status 1

@@ -37,6 +37,16 @@
 
 namespace dawn::wire::server {
 
+WireResult Server::PreHandleDeviceCreateErrorBuffer(const DeviceCreateErrorBufferCmd& cmd) {
+    // mappedAtCreation isn't implemented in CreateErrorBuffer.
+    // The client blocks this, so we can treat it as a fatal wire error (for fuzzers).
+    if (cmd.descriptor->mappedAtCreation) {
+        return WireResult::FatalError;
+    }
+
+    return WireResult::Success;
+}
+
 WireResult Server::PreHandleBufferUnmap(const BufferUnmapCmd& cmd) {
     Known<WGPUBuffer> buffer;
     WIRE_TRY(Objects<WGPUBuffer>().Get(cmd.selfId, &buffer));
@@ -105,8 +115,8 @@ WireResult Server::DoBufferMapAsync(Known<WGPUBuffer> buffer,
 
     mProcs.bufferMapAsync(
         buffer->handle, mode, offset, size,
-        {nullptr, WGPUCallbackMode_AllowSpontaneous,
-         ForwardToServer2<&Server::OnBufferMapAsyncCallback>, userdata.release(), nullptr});
+        {nullptr, WGPUCallbackMode_AllowProcessEvents,
+         ForwardToServer<&Server::OnBufferMapAsyncCallback>, userdata.release(), nullptr});
 
     return WireResult::Success;
 }

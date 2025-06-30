@@ -1,7 +1,7 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
 
+RWByteAddressBuffer prevent_dce : register(u0);
 float2 subgroupExclusiveAdd_4c8024() {
   float2 res = WavePrefixSum((1.0f).xx);
   return res;
@@ -9,14 +9,13 @@ float2 subgroupExclusiveAdd_4c8024() {
 
 void fragment_main() {
   prevent_dce.Store2(0u, asuint(subgroupExclusiveAdd_4c8024()));
-  return;
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
   prevent_dce.Store2(0u, asuint(subgroupExclusiveAdd_4c8024()));
-  return;
 }
+
 FXC validation failure:
 <scrubbed_path>(4,16-39): error X3004: undeclared identifier 'WavePrefixSum'
 

@@ -25,8 +25,8 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "src/tint/lang/core/builtin_fn.h"
 #include "src/tint/lang/core/constant/scalar.h"
+#include "src/tint/lang/core/enums.h"
 #include "src/tint/lang/core/fluent_types.h"
 #include "src/tint/lang/core/ir/disassembler.h"
 #include "src/tint/lang/core/ir/if.h"
@@ -1434,6 +1434,62 @@ _ = foo;
   $B4: {
     %10:bool = let %cond
     %11:bool = let %foo
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_FromProgramTest, OverrideInExpressionInArraySize) {
+    auto* src = R"(
+override x : u32;
+var<workgroup> arr : array<u32, x*2>;
+
+@compute @workgroup_size(64)
+fn main() {
+  _ = arr[0];
+}
+)";
+
+    auto res = Build(src);
+    ASSERT_EQ(res, Success);
+
+    auto m = res.Move();
+    EXPECT_EQ(core::ir::Disassembler(m).Plain(), R"($B1: {  # root
+  %x:u32 = override undef @id(0)
+  %2:u32 = mul %x, 2u
+  %arr:ptr<workgroup, array<u32, %2>, read_write> = var undef
+}
+
+%main = @compute @workgroup_size(64i, 1i, 1i) func():void {
+  $B2: {
+    %5:ptr<workgroup, u32, read_write> = access %arr, 0i
+    %6:u32 = load %5
+    ret
+  }
+}
+)");
+}
+
+TEST_F(IR_FromProgramTest, OverrideInExpressionInWorkgroupSizeAttribute) {
+    auto* src = R"(
+override x : u32;
+
+@compute @workgroup_size(x * 2)
+fn main() { }
+)";
+
+    auto res = Build(src);
+    ASSERT_EQ(res, Success);
+
+    auto m = res.Move();
+    EXPECT_EQ(core::ir::Disassembler(m).Plain(), R"($B1: {  # root
+  %x:u32 = override undef @id(0)
+  %2:u32 = mul %x, 2u
+}
+
+%main = @compute @workgroup_size(%2, 1u, 1u) func():void {
+  $B2: {
     ret
   }
 }

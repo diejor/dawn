@@ -1,29 +1,29 @@
-//* Copyright 2024 The Dawn & Tint Authors
-//*
-//* Redistribution and use in source and binary forms, with or without
-//* modification, are permitted provided that the following conditions are met:
-//*
-//* 1. Redistributions of source code must retain the above copyright notice, this
-//*    list of conditions and the following disclaimer.
-//*
-//* 2. Redistributions in binary form must reproduce the above copyright notice,
-//*    this list of conditions and the following disclaimer in the documentation
-//*    and/or other materials provided with the distribution.
-//*
-//* 3. Neither the name of the copyright holder nor the names of its
-//*    contributors may be used to endorse or promote products derived from
-//*    this software without specific prior written permission.
-//*
-//* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-//* AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-//* IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-//* DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-//* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-//* DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-//* SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-//* CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-//* OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-//* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Copyright 2024 The Dawn & Tint Authors
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 {% from 'art/api_jni_types.cpp' import convert_to_kotlin, jni_signature with context %}
 {% from 'art/kotlin_record_conversion.cpp' import define_kotlin_record_structure, define_kotlin_to_struct_conversion with context %}
 #include "structures.h"
@@ -36,6 +36,7 @@
 
 #include "dawn/common/Assert.h"
 #include "dawn/common/Log.h"
+#include "JNIClasses.h"
 #include "JNIContext.h"
 
 // Converts Kotlin objects representing Dawn structures into native structures that can be passed
@@ -101,9 +102,9 @@ jobject ToKotlin(JNIEnv* env, const WGPUStringView* s) {
         if (!input) {
             return nullptr;
         }
-
+        JNIClasses* classes = JNIClasses::getInstance(env);
         //* Make a new Kotlin object to receive a copy of the structure.
-        jclass clz = env->FindClass("{{ jni_name(structure) }}");
+        jclass clz = classes->{{ structure.name.camelCase() }};
         //* JNI signature needs to be built using the same logic used in the Kotlin structure spec.
         jmethodID ctor = env->GetMethodID(clz, "<init>", "(
         {%- for member in kotlin_record_members(structure.members) %}
@@ -158,7 +159,8 @@ jobject ToKotlin(JNIEnv* env, const WGPUStringView* s) {
     {{ define_kotlin_record_structure(KotlinRecord, structure.members)}}
     {{ define_kotlin_to_struct_conversion("ConvertInternal", KotlinRecord, Struct, structure.members)}}
     void ToNative(JNIContext* c, JNIEnv* env, jobject obj, {{ as_cType(structure.name) }}* converted) {
-        jclass clz = env->FindClass("{{ jni_name(structure) }}");
+        JNIClasses* classes = JNIClasses::getInstance(env);
+        jclass clz = classes->{{ structure.name.camelCase() }};
 
         //* Use getters to fill in the Kotlin record that will get converted to our struct.
         {{KotlinRecord}} kotlinRecord;

@@ -84,6 +84,9 @@ config("internal_config") {
   if (dawn_enable_null) {
     defines += [ "DAWN_ENABLE_BACKEND_NULL" ]
   }
+  if (dawn_enable_webgpu_on_webgpu) {
+    defines += [ "DAWN_ENABLE_BACKEND_WEBGPU" ]
+  }
   if (dawn_enable_opengl) {
     defines += [ "DAWN_ENABLE_BACKEND_OPENGL" ]
   }
@@ -248,6 +251,7 @@ group("abseil") {
       "${dawn_root}/third_party/gn/abseil-cpp:flat_hash_set",
       "${dawn_root}/third_party/gn/abseil-cpp:inlined_vector",
       "${dawn_root}/third_party/gn/abseil-cpp:no_destructor",
+      "${dawn_root}/third_party/gn/abseil-cpp:overload",
     ]
   }
 }
@@ -256,7 +260,7 @@ group("abseil") {
 # all of Chromium's OSes so we explicitly make the target visible only on
 # systems we know Dawn is able to compile on.
 if (is_win || is_linux || is_chromeos || is_mac || is_fuchsia || is_android ||
-    is_ios) {
+    is_ios || is_wasm) {
   static_library("common") {
     sources = [
       "AlignedAlloc.cpp",
@@ -264,12 +268,15 @@ if (is_win || is_linux || is_chromeos || is_mac || is_fuchsia || is_android ||
       "Alloc.h",
       "Assert.cpp",
       "Assert.h",
-      "BitSetIterator.h",
+      "Atomic.h",
+      "BitSetRangeIterator.h",
       "Compiler.h",
       "Constants.h",
       "ContentLessObjectCache.h",
       "ContentLessObjectCacheable.h",
       "CoreFoundationRef.h",
+      "Defer.cpp",
+      "Defer.h",
       "DynamicLib.cpp",
       "DynamicLib.h",
       "Enumerator.h",
@@ -279,6 +286,7 @@ if (is_win || is_linux || is_chromeos || is_mac || is_fuchsia || is_android ||
       "GPUInfo.h",
       "HashUtils.h",
       "IOKitRef.h",
+      "LRUCache.h",
       "LinkedList.h",
       "Log.cpp",
       "Log.h",
@@ -358,10 +366,7 @@ if (is_win || is_linux || is_chromeos || is_mac || is_fuchsia || is_android ||
     # Dawn libraries because `:common` is only used as a private deps of Dawn
     # targets, so `internal_config` doesn't leak out of Dawn.
     public_configs = [ ":internal_config" ]
-    deps = [
-      "${dawn_root}/include/dawn:cpp_headers",
-      "${dawn_root}/include/dawn:headers",
-    ]
+    deps = [ "${dawn_root}/include/dawn:cpp_headers" ]
 
     if (is_win) {
       sources += [

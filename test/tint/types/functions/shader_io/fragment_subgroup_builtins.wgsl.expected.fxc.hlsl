@@ -1,17 +1,18 @@
 SKIP: INVALID
 
-RWByteAddressBuffer output : register(u0);
 
+RWByteAddressBuffer output : register(u0);
 void main_inner(uint subgroup_invocation_id, uint subgroup_size) {
-  output.Store((4u * subgroup_invocation_id), asuint(subgroup_size));
+  output.Store((0u + (uint(subgroup_invocation_id) * 4u)), subgroup_size);
 }
 
 void main() {
-  main_inner(WaveGetLaneIndex(), WaveGetLaneCount());
-  return;
+  uint v = WaveGetLaneIndex();
+  main_inner(v, WaveGetLaneCount());
 }
+
 FXC validation failure:
-<scrubbed_path>(8,14-31): error X3004: undeclared identifier 'WaveGetLaneIndex'
+<scrubbed_path>(8,12-29): error X3004: undeclared identifier 'WaveGetLaneIndex'
 
 
 tint executable returned error: exit status 1

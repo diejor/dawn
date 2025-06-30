@@ -1,7 +1,7 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
 
+RWByteAddressBuffer prevent_dce : register(u0);
 float2 subgroupAdd_dcf73f() {
   float2 res = WaveActiveSum((1.0f).xx);
   return res;
@@ -9,14 +9,13 @@ float2 subgroupAdd_dcf73f() {
 
 void fragment_main() {
   prevent_dce.Store2(0u, asuint(subgroupAdd_dcf73f()));
-  return;
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
   prevent_dce.Store2(0u, asuint(subgroupAdd_dcf73f()));
-  return;
 }
+
 FXC validation failure:
 <scrubbed_path>(4,16-39): error X3004: undeclared identifier 'WaveActiveSum'
 

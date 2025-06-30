@@ -1,26 +1,27 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
 
+RWByteAddressBuffer prevent_dce : register(u0);
 uint3 subgroupShuffleXor_9f945a() {
   uint3 arg_0 = (1u).xxx;
   uint arg_1 = 1u;
-  uint3 res = WaveReadLaneAt(arg_0, (WaveGetLaneIndex() ^ arg_1));
+  uint3 v = arg_0;
+  uint v_1 = arg_1;
+  uint3 res = WaveReadLaneAt(v, (WaveGetLaneIndex() ^ v_1));
   return res;
 }
 
 void fragment_main() {
-  prevent_dce.Store3(0u, asuint(subgroupShuffleXor_9f945a()));
-  return;
+  prevent_dce.Store3(0u, subgroupShuffleXor_9f945a());
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
-  prevent_dce.Store3(0u, asuint(subgroupShuffleXor_9f945a()));
-  return;
+  prevent_dce.Store3(0u, subgroupShuffleXor_9f945a());
 }
+
 FXC validation failure:
-<scrubbed_path>(6,38-55): error X3004: undeclared identifier 'WaveGetLaneIndex'
+<scrubbed_path>(8,34-51): error X3004: undeclared identifier 'WaveGetLaneIndex'
 
 
 tint executable returned error: exit status 1

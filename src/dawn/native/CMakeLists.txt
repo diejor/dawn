@@ -56,6 +56,7 @@ set(private_headers
     "BlitTextureToBuffer.h"
     "Blob.h"
     "BlobCache.h"
+    "BlockInfo.h"
     "BuddyAllocator.h"
     "BuddyMemoryAllocator.h"
     "Buffer.h"
@@ -101,6 +102,7 @@ set(private_headers
     "IntegerTypes.h"
     "InternalPipelineStore.h"
     "Limits.h"
+    "LogEmitter.h"
     "ObjectBase.h"
     "ObjectContentHasher.h"
     "PassResourceUsage.h"
@@ -129,6 +131,7 @@ set(private_headers
     "ScratchBuffer.h"
     "Serializable.h"
     "ShaderModule.h"
+    "ShaderModuleParseRequest.h"
     "SharedBufferMemory.h"
     "SharedFence.h"
     "SharedResourceMemory.h"
@@ -153,6 +156,7 @@ set(private_headers
     "ValidationUtils.h"
     "VisitableMembers.h"
     "WaitAnySystemEvent.h"
+    "WaitListEvent.h"
     "webgpu_absl_format.h"
 )
 
@@ -205,6 +209,7 @@ set(sources
     "ExternalTexture.cpp"
     "Features.cpp"
     "Format.cpp"
+    "ImmediateConstantsLayout.cpp"
     "ImmediateConstantsTracker.cpp"
     "IndirectDrawMetadata.cpp"
     "IndirectDrawValidationEncoder.cpp"
@@ -213,7 +218,6 @@ set(sources
     "Limits.cpp"
     "ObjectBase.cpp"
     "ObjectContentHasher.cpp"
-    "PassResourceUsage.cpp"
     "PassResourceUsageTracker.cpp"
     "PerStage.cpp"
     "PhysicalDevice.cpp"
@@ -236,6 +240,7 @@ set(sources
     "Sampler.cpp"
     "ScratchBuffer.cpp"
     "ShaderModule.cpp"
+    "ShaderModuleParseRequest.cpp"
     "SharedBufferMemory.cpp"
     "SharedFence.cpp"
     "SharedResourceMemory.cpp"
@@ -253,6 +258,7 @@ set(sources
     "Toggles.cpp"
     "utils/WGPUHelpers.cpp"
     "ValidationUtils.cpp"
+    "WaitListEvent.cpp"
     "webgpu_absl_format.cpp"
 )
 
@@ -539,11 +545,13 @@ if (DAWN_ENABLE_METAL)
         "Surface_metal.mm"
     )
     if (DAWN_TARGET_MACOS)
-        list(APPEND conditional_private_platform_depends "-framework Cocoa")
+        list(APPEND conditional_private_platform_depends
+            "-framework Cocoa"
+            "-framework IOKit"
+        )
     endif()
     list(APPEND conditional_private_platform_depends
         "-framework Foundation"
-        "-framework IOKit"
         "-framework IOSurface"
         "-framework QuartzCore"
         "-framework Metal"
@@ -559,6 +567,30 @@ if (DAWN_ENABLE_NULL)
     )
     list(APPEND sources
         "null/DeviceNull.cpp"
+    )
+endif()
+
+if (DAWN_ENABLE_WEBGPU_ON_WEBGPU)
+    list(APPEND headers
+        "${DAWN_INCLUDE_DIR}/dawn/native/WebGPUBackend.h"
+    )
+    list(APPEND private_headers
+        "webgpu/BackendWGPU.h"
+        "webgpu/BufferWGPU.h"
+        "webgpu/CommandBufferWGPU.h"
+        "webgpu/DeviceWGPU.h"
+        "webgpu/Forward.h"
+        "webgpu/PhysicalDeviceWGPU.h"
+        "webgpu/QueueWGPU.h"
+        "webgpu/WebGPUError.h"
+    )
+    list(APPEND sources
+        "webgpu/BackendWGPU.cpp"
+        "webgpu/BufferWGPU.cpp"
+        "webgpu/CommandBufferWGPU.cpp"
+        "webgpu/DeviceWGPU.cpp"
+        "webgpu/PhysicalDeviceWGPU.cpp"
+        "webgpu/QueueWGPU.cpp"
     )
 endif()
 
@@ -751,8 +783,8 @@ if (DAWN_ENABLE_VULKAN)
     )
 
     list(APPEND conditional_public_depends
-        Vulkan-Headers
-        VulkanUtilityHeaders
+        Vulkan::Headers
+        Vulkan::UtilityHeaders
     )
 
     if (ANDROID)
@@ -794,6 +826,9 @@ if (DAWN_ENABLE_METAL)
 endif()
 if (DAWN_ENABLE_NULL)
     list(APPEND dawn_component_srcs "null/NullBackend.cpp")
+endif()
+if (DAWN_ENABLE_WEBGPU_ON_WEBGPU)
+    list(APPEND dawn_component_srcs "webgpu/WebGPUBackend.cpp")
 endif()
 if (DAWN_ENABLE_OPENGL)
     list(APPEND dawn_component_srcs "opengl/OpenGLBackend.cpp")

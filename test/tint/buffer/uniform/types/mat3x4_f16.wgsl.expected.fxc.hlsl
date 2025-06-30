@@ -1,43 +1,43 @@
 SKIP: INVALID
 
+
 cbuffer cbuffer_u : register(b0) {
   uint4 u[2];
 };
 RWByteAddressBuffer s : register(u1);
-
-matrix<float16_t, 3, 4> u_load(uint offset) {
-  const uint scalar_offset = ((offset + 0u)) / 4;
-  uint4 ubo_load_1 = u[scalar_offset / 4];
-  uint2 ubo_load = ((scalar_offset & 2) ? ubo_load_1.zw : ubo_load_1.xy);
-  vector<float16_t, 2> ubo_load_xz = vector<float16_t, 2>(f16tof32(ubo_load & 0xFFFF));
-  vector<float16_t, 2> ubo_load_yw = vector<float16_t, 2>(f16tof32(ubo_load >> 16));
-  const uint scalar_offset_1 = ((offset + 8u)) / 4;
-  uint4 ubo_load_3 = u[scalar_offset_1 / 4];
-  uint2 ubo_load_2 = ((scalar_offset_1 & 2) ? ubo_load_3.zw : ubo_load_3.xy);
-  vector<float16_t, 2> ubo_load_2_xz = vector<float16_t, 2>(f16tof32(ubo_load_2 & 0xFFFF));
-  vector<float16_t, 2> ubo_load_2_yw = vector<float16_t, 2>(f16tof32(ubo_load_2 >> 16));
-  const uint scalar_offset_2 = ((offset + 16u)) / 4;
-  uint4 ubo_load_5 = u[scalar_offset_2 / 4];
-  uint2 ubo_load_4 = ((scalar_offset_2 & 2) ? ubo_load_5.zw : ubo_load_5.xy);
-  vector<float16_t, 2> ubo_load_4_xz = vector<float16_t, 2>(f16tof32(ubo_load_4 & 0xFFFF));
-  vector<float16_t, 2> ubo_load_4_yw = vector<float16_t, 2>(f16tof32(ubo_load_4 >> 16));
-  return matrix<float16_t, 3, 4>(vector<float16_t, 4>(ubo_load_xz[0], ubo_load_yw[0], ubo_load_xz[1], ubo_load_yw[1]), vector<float16_t, 4>(ubo_load_2_xz[0], ubo_load_2_yw[0], ubo_load_2_xz[1], ubo_load_2_yw[1]), vector<float16_t, 4>(ubo_load_4_xz[0], ubo_load_4_yw[0], ubo_load_4_xz[1], ubo_load_4_yw[1]));
+void v_1(uint offset, matrix<float16_t, 3, 4> obj) {
+  s.Store<vector<float16_t, 4> >((offset + 0u), obj[0u]);
+  s.Store<vector<float16_t, 4> >((offset + 8u), obj[1u]);
+  s.Store<vector<float16_t, 4> >((offset + 16u), obj[2u]);
 }
 
-void s_store(uint offset, matrix<float16_t, 3, 4> value) {
-  s.Store<vector<float16_t, 4> >((offset + 0u), value[0u]);
-  s.Store<vector<float16_t, 4> >((offset + 8u), value[1u]);
-  s.Store<vector<float16_t, 4> >((offset + 16u), value[2u]);
+vector<float16_t, 4> tint_bitcast_to_f16(uint4 src) {
+  uint4 v = src;
+  uint4 mask = (65535u).xxxx;
+  uint4 shift = (16u).xxxx;
+  float4 t_low = f16tof32((v & mask));
+  float4 t_high = f16tof32(((v >> shift) & mask));
+  float16_t v_2 = float16_t(t_low.x);
+  float16_t v_3 = float16_t(t_high.x);
+  float16_t v_4 = float16_t(t_low.y);
+  return vector<float16_t, 4>(v_2, v_3, v_4, float16_t(t_high.y));
+}
+
+matrix<float16_t, 3, 4> v_5(uint start_byte_offset) {
+  vector<float16_t, 4> v_6 = tint_bitcast_to_f16(u[(start_byte_offset / 16u)]);
+  vector<float16_t, 4> v_7 = tint_bitcast_to_f16(u[((8u + start_byte_offset) / 16u)]);
+  return matrix<float16_t, 3, 4>(v_6, v_7, tint_bitcast_to_f16(u[((16u + start_byte_offset) / 16u)]));
 }
 
 [numthreads(1, 1, 1)]
 void main() {
-  matrix<float16_t, 3, 4> x = u_load(0u);
-  s_store(0u, x);
-  return;
+  matrix<float16_t, 3, 4> x = v_5(0u);
+  v_1(0u, x);
 }
+
 FXC validation failure:
-<scrubbed_path>(6,8-16): error X3000: syntax error: unexpected token 'float16_t'
+<scrubbed_path>(6,30-38): error X3000: syntax error: unexpected token 'float16_t'
+<scrubbed_path>(7,3-9): error X3018: invalid subscript 'Store'
 
 
 tint executable returned error: exit status 1

@@ -1,7 +1,7 @@
 SKIP: INVALID
 
-RWByteAddressBuffer prevent_dce : register(u0);
 
+RWByteAddressBuffer prevent_dce : register(u0);
 uint subgroupExclusiveMul_dc51f8() {
   uint arg_0 = 1u;
   uint res = WavePrefixProduct(arg_0);
@@ -9,15 +9,14 @@ uint subgroupExclusiveMul_dc51f8() {
 }
 
 void fragment_main() {
-  prevent_dce.Store(0u, asuint(subgroupExclusiveMul_dc51f8()));
-  return;
+  prevent_dce.Store(0u, subgroupExclusiveMul_dc51f8());
 }
 
 [numthreads(1, 1, 1)]
 void compute_main() {
-  prevent_dce.Store(0u, asuint(subgroupExclusiveMul_dc51f8()));
-  return;
+  prevent_dce.Store(0u, subgroupExclusiveMul_dc51f8());
 }
+
 FXC validation failure:
 <scrubbed_path>(5,14-37): error X3004: undeclared identifier 'WavePrefixProduct'
 

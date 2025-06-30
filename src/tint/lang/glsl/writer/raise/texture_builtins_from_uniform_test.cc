@@ -50,7 +50,7 @@ using GlslWriter_TextureBuiltinsFromUniformTest = core::ir::transform::Transform
 
 TEST_F(GlslWriter_TextureBuiltinsFromUniformTest, TextureNumLevels) {
     auto* t = b.Var(ty.ptr(handle, ty.sampled_texture(core::type::TextureDimension::k2d, ty.f32()),
-                           read_write));
+                           core::Access::kRead));
     t->SetBindingPoint(0, 0);
     b.ir.root_block->Append(t);
 
@@ -63,7 +63,7 @@ TEST_F(GlslWriter_TextureBuiltinsFromUniformTest, TextureNumLevels) {
 
     auto* src = R"(
 $B1: {  # root
-  %1:ptr<handle, texture_2d<f32>, read_write> = var undef @binding_point(0, 0)
+  %1:ptr<handle, texture_2d<f32>, read> = var undef @binding_point(0, 0)
 }
 
 %main = @compute @workgroup_size(1u, 1u, 1u) func():void {
@@ -97,15 +97,14 @@ $B1: {  # root
 }
 )";
 
-    TextureBuiltinsFromUniformOptions cfg = {{0, 30u}, std::vector<BindingPoint>{{0, 0}}};
+    TextureBuiltinsFromUniformOptions cfg = {{30u}, {{0}}};
     Run(TextureBuiltinsFromUniform, cfg);
     EXPECT_EQ(expect, str());
 }
 
 TEST_F(GlslWriter_TextureBuiltinsFromUniformTest, TextureNumSamples) {
-    auto* t = b.Var(ty.ptr(
-        handle, ty.Get<core::type::DepthMultisampledTexture>(core::type::TextureDimension::k2d),
-        read_write));
+    auto* t = b.Var(ty.ptr(handle, ty.depth_multisampled_texture(core::type::TextureDimension::k2d),
+                           core::Access::kRead));
     t->SetBindingPoint(0, 0);
     b.ir.root_block->Append(t);
 
@@ -118,7 +117,7 @@ TEST_F(GlslWriter_TextureBuiltinsFromUniformTest, TextureNumSamples) {
 
     auto* src = R"(
 $B1: {  # root
-  %1:ptr<handle, texture_depth_multisampled_2d, read_write> = var undef @binding_point(0, 0)
+  %1:ptr<handle, texture_depth_multisampled_2d, read> = var undef @binding_point(0, 0)
 }
 
 %main = @compute @workgroup_size(1u, 1u, 1u) func():void {
@@ -152,14 +151,14 @@ $B1: {  # root
 }
 )";
 
-    TextureBuiltinsFromUniformOptions cfg = {{0, 30u}, std::vector<BindingPoint>{{0, 0}}};
+    TextureBuiltinsFromUniformOptions cfg = {{30u}, {{0}}};
     Run(TextureBuiltinsFromUniform, cfg);
     EXPECT_EQ(expect, str());
 }
 
 TEST_F(GlslWriter_TextureBuiltinsFromUniformTest, SameBuiltinCalledMultipleTimesTextureNumLevels) {
     auto* t = b.Var(ty.ptr(handle, ty.sampled_texture(core::type::TextureDimension::k2d, ty.f32()),
-                           read_write));
+                           core::Access::kRead));
     t->SetBindingPoint(0, 0);
     b.ir.root_block->Append(t);
 
@@ -173,7 +172,7 @@ TEST_F(GlslWriter_TextureBuiltinsFromUniformTest, SameBuiltinCalledMultipleTimes
 
     auto* src = R"(
 $B1: {  # root
-  %1:ptr<handle, texture_2d<f32>, read_write> = var undef @binding_point(0, 0)
+  %1:ptr<handle, texture_2d<f32>, read> = var undef @binding_point(0, 0)
 }
 
 %main = @compute @workgroup_size(1u, 1u, 1u) func():void {
@@ -212,15 +211,14 @@ $B1: {  # root
 }
 )";
 
-    TextureBuiltinsFromUniformOptions cfg = {{0, 30u}, std::vector<BindingPoint>{{0, 0}}};
+    TextureBuiltinsFromUniformOptions cfg = {{30u}, {{0}}};
     Run(TextureBuiltinsFromUniform, cfg);
     EXPECT_EQ(expect, str());
 }
 
 TEST_F(GlslWriter_TextureBuiltinsFromUniformTest, SameBuiltinCalledMultipleTimesTextureNumSamples) {
-    auto* t = b.Var(ty.ptr(
-        handle, ty.Get<core::type::DepthMultisampledTexture>(core::type::TextureDimension::k2d),
-        read_write));
+    auto* t = b.Var(ty.ptr(handle, ty.depth_multisampled_texture(core::type::TextureDimension::k2d),
+                           core::Access::kRead));
     t->SetBindingPoint(0, 0);
     b.ir.root_block->Append(t);
 
@@ -234,7 +232,7 @@ TEST_F(GlslWriter_TextureBuiltinsFromUniformTest, SameBuiltinCalledMultipleTimes
 
     auto* src = R"(
 $B1: {  # root
-  %1:ptr<handle, texture_depth_multisampled_2d, read_write> = var undef @binding_point(0, 0)
+  %1:ptr<handle, texture_depth_multisampled_2d, read> = var undef @binding_point(0, 0)
 }
 
 %main = @compute @workgroup_size(1u, 1u, 1u) func():void {
@@ -273,7 +271,7 @@ $B1: {  # root
 }
 )";
 
-    TextureBuiltinsFromUniformOptions cfg = {{0, 30u}, std::vector<BindingPoint>{{0, 0}}};
+    TextureBuiltinsFromUniformOptions cfg = {{30u}, {{0}}};
     Run(TextureBuiltinsFromUniform, cfg);
     EXPECT_EQ(expect, str());
 }
