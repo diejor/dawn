@@ -39,6 +39,7 @@
 #include "src/tint/lang/core/type/multisampled_texture.h"
 #include "src/tint/lang/core/type/sampled_texture.h"
 #include "src/tint/lang/core/type/storage_texture.h"
+#include "src/tint/lang/core/type/texel_buffer.h"
 #include "src/tint/lang/glsl/ir/builtin_call.h"
 #include "src/tint/lang/glsl/ir/combined_texture_sampler_var.h"
 #include "src/tint/lang/glsl/ir/member_builtin_call.h"
@@ -683,6 +684,12 @@ struct State {
             uint32_t idx = 0;
             auto args = call->Args();
             auto* tex = GetNewTexture(args[idx++]);
+
+            auto* tex_ty = tex->Type();
+            if (tex_ty->Is<core::type::TexelBuffer>()) {
+                TINT_UNIMPLEMENTED() << "textureStore for texel_buffer";
+            }
+
             auto* tex_type = tex->Type()->As<core::type::StorageTexture>();
             TINT_ASSERT(tex_type);
 

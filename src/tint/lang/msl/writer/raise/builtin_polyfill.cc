@@ -41,6 +41,7 @@
 #include "src/tint/lang/core/type/multisampled_texture.h"
 #include "src/tint/lang/core/type/scalar.h"
 #include "src/tint/lang/core/type/storage_texture.h"
+#include "src/tint/lang/core/type/texel_buffer.h"
 #include "src/tint/lang/core/type/texture.h"
 #include "src/tint/lang/core/type/texture_dimension.h"
 #include "src/tint/lang/core/type/vector.h"
@@ -879,6 +880,12 @@ struct State {
     /// @param builtin the builtin call instruction
     void TextureStore(core::ir::CoreBuiltinCall* builtin) {
         auto* tex = builtin->Args()[0];
+
+        auto* tex_ty = tex->Type();
+        if (tex_ty->Is<core::type::TexelBuffer>()) {
+            TINT_UNIMPLEMENTED() << "texetureStore for texel_buffer";
+        }
+        
         auto* tex_type = tex->Type()->As<core::type::StorageTexture>();
 
         // Extract the arguments from the core builtin call.

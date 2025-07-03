@@ -40,6 +40,7 @@
 #include "src/tint/lang/core/type/multisampled_texture.h"
 #include "src/tint/lang/core/type/sampled_texture.h"
 #include "src/tint/lang/core/type/storage_texture.h"
+#include "src/tint/lang/core/type/texel_buffer.h"
 #include "src/tint/lang/core/type/texture.h"
 #include "src/tint/lang/core/type/u32.h"
 #include "src/tint/lang/core/type/vector.h"
@@ -50,6 +51,7 @@
 #include "src/tint/lang/hlsl/type/int8_t4_packed.h"
 #include "src/tint/lang/hlsl/type/uint8_t4_packed.h"
 #include "src/tint/utils/containers/hashmap.h"
+#include "src/tint/utils/ice/ice.h"
 #include "src/tint/utils/math/hash.h"
 
 namespace tint::hlsl::writer::raise {
@@ -1070,6 +1072,12 @@ struct State {
     void TextureStore(core::ir::CoreBuiltinCall* call) {
         auto args = call->Args();
         auto* tex = args[0];
+        
+        auto* tex_ty = tex->Type();
+        if (tex_ty->Is<core::type::TexelBuffer>()) {
+            TINT_UNIMPLEMENTED() << "textureStore for texel_buffer";
+        }
+
         auto* tex_type = tex->Type()->As<core::type::StorageTexture>();
         TINT_ASSERT(tex_type);
 
