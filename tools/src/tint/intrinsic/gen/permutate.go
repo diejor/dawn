@@ -441,7 +441,7 @@ func validate(fqn sem.FullyQualifiedName, uses *sem.StageUses) bool {
 				return false
 			}
 		case "handle":
-			if access != "read" {
+			if access != "read_write" && access != "read" {
 				return false
 			}
 		default:
