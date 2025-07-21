@@ -78,6 +78,10 @@ PipelineLayout::PipelineLayout(Device* device,
                         mIndexInfo[stage][group][bindingIndex] = textureIndex;
                         textureIndex++;
                     },
+                    [&](const TexelBufferBindingInfo&) {
+                        // TODO(crbug/382544164): Prototype texel buffer feature
+                        DAWN_UNREACHABLE();
+                    },
                     [&](const StaticSamplerBindingInfo&) {
                         // Static samplers are handled in the frontend.
                         // TODO(crbug.com/dawn/2482): Implement static samplers in the
