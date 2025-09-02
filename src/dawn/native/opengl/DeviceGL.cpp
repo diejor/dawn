@@ -215,6 +215,10 @@ MaybeError Device::Initialize(const UnpackedPtr<DeviceDescriptor>& descriptor) {
     // Create internal buffers needed for workarounds.
     if (mTextureBuiltinsBuffer.Get() == nullptr) {
         BufferDescriptor desc = {};
+        // The uniform buffer will contain an array of vec4u so make sure that it contains the last
+        // possible vec4u entirely by rounding the size to 4 u32s. Check that the constant is indeed
+        // a multiple of 4.
+        static_assert(kGLMaxTextureImageUnitsReported % 4 == 0);
         desc.size = kGLMaxTextureImageUnitsReported * sizeof(uint32_t);
         desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         Ref<BufferBase> buffer;
@@ -245,11 +249,11 @@ const GLFormat& Device::GetGLFormat(const Format& format) {
 }
 
 ResultOrError<Ref<BindGroupBase>> Device::CreateBindGroupImpl(
-    const BindGroupDescriptor* descriptor) {
+    const UnpackedPtr<BindGroupDescriptor>& descriptor) {
     return BindGroup::Create(this, descriptor);
 }
 ResultOrError<Ref<BindGroupLayoutInternalBase>> Device::CreateBindGroupLayoutImpl(
-    const BindGroupLayoutDescriptor* descriptor) {
+    const UnpackedPtr<BindGroupLayoutDescriptor>& descriptor) {
     return AcquireRef(new BindGroupLayout(this, descriptor));
 }
 ResultOrError<Ref<BufferBase>> Device::CreateBufferImpl(

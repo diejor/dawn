@@ -39,6 +39,7 @@
 #include "src/tint/lang/core/type/storage_texture.h"
 #include "src/tint/lang/core/type/u32.h"
 #include "src/tint/lang/core/type/void.h"
+#include "src/tint/lang/spirv/type/explicit_layout_array.h"
 #include "src/tint/lang/spirv/writer/common/helper_test.h"
 
 using namespace tint::core::fluent_types;  // NOLINT
@@ -188,7 +189,11 @@ TEST_F(SpirvWriterTest, Type_Array_DefaultStride) {
 
 TEST_F(SpirvWriterTest, Type_Array_ExplicitStride) {
     b.Append(b.ir.root_block, [&] {  //
-        auto* v = b.Var("v", ty.ptr<storage>(ty.array<f32, 4>(16)));
+        auto* cnt = ty.Get<core::type::ConstantArrayCount>(4_u);
+        auto* ex = ty.Get<type::ExplicitLayoutArray>(/* element */ ty.f32(), /* count */ cnt,
+                                                     /* align */ 4_u, /* size */ 4_u * 4_u,
+                                                     /* stride */ 16_u);
+        auto* v = b.Var("v", ty.ptr<storage>(ex));
         v->SetBindingPoint(0, 0);
     });
 
@@ -223,7 +228,11 @@ TEST_F(SpirvWriterTest, Type_RuntimeArray_DefaultStride) {
 
 TEST_F(SpirvWriterTest, Type_RuntimeArray_ExplicitStride) {
     b.Append(b.ir.root_block, [&] {  //
-        auto* v = b.Var("v", ty.ptr<storage, read_write>(ty.array<f32>(16)));
+        auto* cnt = ty.Get<core::type::RuntimeArrayCount>();
+        auto* ex =
+            ty.Get<type::ExplicitLayoutArray>(/* element */ ty.f32(), /* count */ cnt,
+                                              /* align */ 4_u, /* size */ 16_u, /* stride */ 16_u);
+        auto* v = b.Var("v", ty.ptr<storage, read_write>(ex));
         v->SetBindingPoint(0, 0);
     });
 
@@ -573,6 +582,61 @@ INSTANTIATE_TEST_SUITE_P(SpirvWriterTest,
                                                 Dim::k2d, Format::kRgba8Uint},
                              StorageTextureCase{" = OpTypeImage %float 2D 0 0 0 2 Rgba8",  //
                                                 Dim::k2d, Format::kRgba8Unorm}));
+
+struct TexelBufferCase {
+    std::string result;
+    Format format;
+};
+
+using Type_TexelBuffer = SpirvWriterTestWithParam<TexelBufferCase>;
+TEST_P(Type_TexelBuffer, Emit) {
+    auto params = GetParam();
+    b.Append(b.ir.root_block, [&] {
+        auto* v = b.Var("v", ty.ptr<handle, core::Access::kRead>(
+                                 ty.texel_buffer(params.format, core::Access::kReadWrite)));
+        v->SetBindingPoint(0, 0);
+    });
+
+    ASSERT_TRUE(Generate()) << Error() << output_;
+    EXPECT_INST(params.result);
+    EXPECT_INST("OpCapability ImageBuffer");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SpirvWriterTest,
+    Type_TexelBuffer,
+    testing::Values(TexelBufferCase{" = OpTypeImage %float Buffer 0 0 0 2 R32f",  //
+                                    Format::kR32Float},
+                    TexelBufferCase{" = OpTypeImage %int Buffer 0 0 0 2 R32i",  //
+                                    Format::kR32Sint},
+                    TexelBufferCase{" = OpTypeImage %uint Buffer 0 0 0 2 R32u",  //
+                                    Format::kR32Uint},
+                    TexelBufferCase{" = OpTypeImage %float Buffer 0 0 0 2 Rg32f",  //
+                                    Format::kRg32Float},
+                    TexelBufferCase{" = OpTypeImage %int Buffer 0 0 0 2 Rg32i",  //
+                                    Format::kRg32Sint},
+                    TexelBufferCase{" = OpTypeImage %uint Buffer 0 0 0 2 Rg32ui",  //
+                                    Format::kRg32Uint},
+                    TexelBufferCase{" = OpTypeImage %float Buffer 0 0 0 2 Rgba16f",  //
+                                    Format::kRgba16Float},
+                    TexelBufferCase{" = OpTypeImage %int Buffer 0 0 0 2 Rgba16i",  //
+                                    Format::kRgba16Sint},
+                    TexelBufferCase{" = OpTypeImage %uint Buffer 0 0 0 2 Rgba16ui",  //
+                                    Format::kRgba16Uint},
+                    TexelBufferCase{" = OpTypeImage %float Buffer 0 0 0 2 Rgba32f",  //
+                                    Format::kRgba32Float},
+                    TexelBufferCase{" = OpTypeImage %int Buffer 0 0 0 2 Rgba32i",  //
+                                    Format::kRgba32Sint},
+                    TexelBufferCase{" = OpTypeImage %uint Buffer 0 0 0 2 Rgba32ui",  //
+                                    Format::kRgba32Uint},
+                    TexelBufferCase{" = OpTypeImage %int Buffer 0 0 0 2 Rgba8i",  //
+                                    Format::kRgba8Sint},
+                    TexelBufferCase{" = OpTypeImage %float Buffer 0 0 0 2 Rgba8Snorm",  //
+                                    Format::kRgba8Snorm},
+                    TexelBufferCase{" = OpTypeImage %uint Buffer 0 0 0 2 Rgba8ui",  //
+                                    Format::kRgba8Uint},
+                    TexelBufferCase{" = OpTypeImage %float Buffer 0 0 0 2 Rgba8",  //
+                                    Format::kRgba8Unorm}));
 
 TEST_F(SpirvWriterTest, Type_SubgroupMatrix) {
     b.Append(b.ir.root_block, [&] {  //

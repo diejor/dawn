@@ -98,7 +98,9 @@ struct State {
 
         // Find all function parameters that contain vec3 types in host-shareable address spaces and
         // update them to use packed vec3 types instead.
-        for (auto func : ir.functions) {
+        // Take a copy of the function list as we may add new functions when updating usages.
+        auto functions = ir.functions;
+        for (auto func : functions) {
             for (auto* param : func->Params()) {
                 auto* ptr = param->Type()->As<core::type::Pointer>();
                 if (!ptr || !AddressSpaceNeedsPacking(ptr->AddressSpace())) {
@@ -315,7 +317,7 @@ struct State {
                 // Packed vectors support component access so there is usually nothing to do.
                 // For vectors that were originally booleans we need to convert the u32 that we load
                 // to a bool.
-                if (unpacked_type->IsBoolVector()) {
+                if (unpacked_type->UnwrapPtr()->IsBoolVector()) {
                     auto* u32_load = b.InstructionResult<u32>();
                     auto* converted_to_bool = b.ConvertWithResult(lve->DetachResult(), u32_load);
                     converted_to_bool->InsertAfter(lve);
@@ -330,7 +332,7 @@ struct State {
                 // Packed vectors support component access so there is usually nothing to do.
                 // For vectors that were originally booleans we need to convert the bool to a u32
                 // before we store it.
-                if (unpacked_type->IsBoolVector()) {
+                if (unpacked_type->UnwrapPtr()->IsBoolVector()) {
                     auto* converted_to_u32 = b.Convert<u32>(sve->Value());
                     converted_to_u32->InsertBefore(sve);
                     sve->SetOperand(core::ir::StoreVectorElement::kValueOperandOffset,
@@ -680,9 +682,12 @@ struct State {
 }  // namespace
 
 Result<SuccessType> PackedVec3(core::ir::Module& ir) {
-    auto result = ValidateAndDumpIfNeeded(
-        ir, "msl.PackedVec3",
-        tint::core::ir::Capabilities{tint::core::ir::Capability::kAllowDuplicateBindings});
+    auto result = ValidateAndDumpIfNeeded(ir, "msl.PackedVec3",
+                                          tint::core::ir::Capabilities{
+                                              core::ir::Capability::kAllow8BitIntegers,
+                                              tint::core::ir::Capability::kAllowDuplicateBindings,
+                                              core::ir::Capability::kAllowNonCoreTypes,
+                                          });
     if (result != Success) {
         return result.Failure();
     }

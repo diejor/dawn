@@ -57,7 +57,7 @@ const Vendor kVendors[] = {{"ATI", gpu_info::kVendorID_AMD},
                            {"Imagination", gpu_info::kVendorID_ImgTec},
                            {"Intel", gpu_info::kVendorID_Intel},
                            {"NVIDIA", gpu_info::kVendorID_Nvidia},
-                           {"Qualcomm", gpu_info::kVendorID_Qualcomm_PCI}};
+                           {"Qualcomm", gpu_info::kVendorID_QualcommPCI}};
 
 uint32_t GetVendorIdFromVendors(const char* vendor) {
     uint32_t vendorId = 0;
@@ -299,6 +299,11 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     // Float32Blendable
     if (mFunctions.IsGLExtensionSupported("GL_EXT_float_blend")) {
         EnableFeature(Feature::Float32Blendable);
+    }
+
+    // TextureComponentSwizzle
+    if (mFunctions.IsAtLeastGLES(3, 0) || mFunctions.IsAtLeastGL(3, 3)) {
+        EnableFeature(Feature::TextureComponentSwizzle);
     }
 }
 

@@ -304,10 +304,10 @@ WGPUFuture Adapter::APIRequestDevice(const WGPUDeviceDescriptor* descriptor,
     }
 
     AdapterRequestDeviceCmd cmd;
-    cmd.adapterId = GetWireId();
+    cmd.adapterId = GetWireHandle(client).id;
     cmd.eventManagerHandle = GetEventManagerHandle();
     cmd.future = {futureIDInternal};
-    cmd.deviceObjectHandle = device->GetWireHandle();
+    cmd.deviceObjectHandle = device->GetWireHandle(client);
     cmd.deviceLostFuture = device->APIGetLostFuture();
     cmd.descriptor = &wireDescriptor;
 
@@ -322,9 +322,8 @@ WireResult Client::DoAdapterRequestDeviceCallback(ObjectHandle eventManager,
                                                   const WGPULimits* limits,
                                                   uint32_t featuresCount,
                                                   const WGPUFeatureName* features) {
-    return GetEventManager(eventManager)
-        .SetFutureReady<RequestDeviceEvent>(future.id, status, message, limits, featuresCount,
-                                            features);
+    return SetFutureReady<RequestDeviceEvent>(eventManager, future.id, status, message, limits,
+                                              featuresCount, features);
 }
 
 WGPUInstance Adapter::APIGetInstance() const {

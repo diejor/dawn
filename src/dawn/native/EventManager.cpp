@@ -151,7 +151,6 @@ bool PollFutures(std::vector<TrackedFutureWaitInfo>& futures) {
 // source validation.
 using QueueWaitSerialsMap = absl::flat_hash_map<WeakRef<QueueBase>, ExecutionSerial>;
 void WaitQueueSerials(const QueueWaitSerialsMap& queueWaitSerials, Nanoseconds timeout) {
-    // TODO(dawn:1662): Make error handling thread-safe.
     // Poll/wait on queues up to the lowest wait serial, but do this once per queue instead of
     // per event so that events with same serial complete at the same time instead of racing.
     for (const auto& queueAndSerial : queueWaitSerials) {
@@ -162,33 +161,8 @@ void WaitQueueSerials(const QueueWaitSerialsMap& queueWaitSerials, Nanoseconds t
         }
         auto waitSerial = queueAndSerial.second;
 
-        auto* device = queue->GetDevice();
-        {
-            auto deviceLock(device->GetScopedLock());
-            [[maybe_unused]] bool error = device->ConsumedError(
-                [&]() -> MaybeError {
-                    if (waitSerial > queue->GetLastSubmittedCommandSerial()) {
-                        // Serial has not been submitted yet. Submit it now.
-                        DAWN_TRY(queue->EnsureCommandsFlushed(waitSerial));
-                    }
-                    // Check the completed serial.
-                    if (waitSerial > queue->GetCompletedCommandSerial()) {
-                        if (timeout > Nanoseconds(0)) {
-                            // Wait on the serial if it hasn't passed yet.
-                            [[maybe_unused]] bool waitResult = false;
-                            DAWN_TRY_ASSIGN(waitResult,
-                                            queue->WaitForQueueSerial(waitSerial, timeout));
-                        }
-                        // Update completed serials.
-                        DAWN_TRY(queue->CheckPassedSerials());
-                    }
-                    return {};
-                }(),
-                "waiting for work in %s.", queue.Get());
-        }
-        // TODO(crbug.com/421945313): Checking and updating serials cannot hold the device-wide lock
-        // because it may cause user callbacks to fire.
-        queue->UpdateCompletedSerial(queue->GetCompletedCommandSerial());
+        [[maybe_unused]] bool hadError = queue->GetDevice()->ConsumedError(
+            queue->WaitForQueueSerial(waitSerial, timeout), "waiting for work in %s.", queue.Get());
     }
 }
 
@@ -297,10 +271,9 @@ MaybeError EventManager::Initialize(const UnpackedPtr<InstanceDescriptor>& descr
     if (descriptor) {
         for (auto feature :
              std::span(descriptor->requiredFeatures, descriptor->requiredFeatureCount)) {
-            switch (feature) {
-                case wgpu::InstanceFeatureName::TimedWaitAny:
-                    mTimedWaitAnyEnable = true;
-                    break;
+            if (feature == wgpu::InstanceFeatureName::TimedWaitAny) {
+                mTimedWaitAnyEnable = true;
+                break;
             }
         }
         if (descriptor->requiredLimits) {
@@ -356,7 +329,7 @@ FutureID EventManager::TrackEvent(Ref<TrackedEvent>&& event) {
         if (auto q = queueAndSerial->queue.Promote()) {
             q->TrackSerialTask(queueAndSerial->completionSerial, [this, event]() {
                 // If this is executed, we can be sure that the raw pointer to this EventManager is
-                // valid because the Queue is alive and:
+                // valid because the task is ran by the Queue and:
                 //   Queue -[refs]->
                 //     Device -[refs]->
                 //       Adapter -[refs]->

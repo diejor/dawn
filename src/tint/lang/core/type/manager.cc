@@ -58,30 +58,52 @@ namespace {
 
 const Type* SubtypeFor(core::TexelFormat format, Manager& type_mgr) {
     switch (format) {
-        case core::TexelFormat::kR32Uint:
+        case core::TexelFormat::kR8Uint:
+        case core::TexelFormat::kRg8Uint:
         case core::TexelFormat::kRgba8Uint:
-        case core::TexelFormat::kRg32Uint:
+        case core::TexelFormat::kR16Uint:
+        case core::TexelFormat::kRg16Uint:
         case core::TexelFormat::kRgba16Uint:
-        case core::TexelFormat::kRgba32Uint: {
+        case core::TexelFormat::kR32Uint:
+        case core::TexelFormat::kRg32Uint:
+        case core::TexelFormat::kRgba32Uint:
+        case core::TexelFormat::kRgb10A2Uint: {
             return type_mgr.u32();
         }
 
-        case core::TexelFormat::kR32Sint:
+        case core::TexelFormat::kR8Sint:
+        case core::TexelFormat::kRg8Sint:
         case core::TexelFormat::kRgba8Sint:
-        case core::TexelFormat::kRg32Sint:
+        case core::TexelFormat::kR16Sint:
+        case core::TexelFormat::kRg16Sint:
         case core::TexelFormat::kRgba16Sint:
+        case core::TexelFormat::kR32Sint:
+        case core::TexelFormat::kRg32Sint:
         case core::TexelFormat::kRgba32Sint: {
             return type_mgr.i32();
         }
 
         case core::TexelFormat::kR8Unorm:
+        case core::TexelFormat::kR8Snorm:
+        case core::TexelFormat::kRg8Unorm:
+        case core::TexelFormat::kRg8Snorm:
         case core::TexelFormat::kBgra8Unorm:
         case core::TexelFormat::kRgba8Unorm:
         case core::TexelFormat::kRgba8Snorm:
+        case core::TexelFormat::kR16Unorm:
+        case core::TexelFormat::kR16Snorm:
+        case core::TexelFormat::kRg16Unorm:
+        case core::TexelFormat::kRg16Snorm:
+        case core::TexelFormat::kRgba16Unorm:
+        case core::TexelFormat::kRgba16Snorm:
+        case core::TexelFormat::kR16Float:
+        case core::TexelFormat::kRg16Float:
+        case core::TexelFormat::kRgba16Float:
         case core::TexelFormat::kR32Float:
         case core::TexelFormat::kRg32Float:
-        case core::TexelFormat::kRgba16Float:
-        case core::TexelFormat::kRgba32Float: {
+        case core::TexelFormat::kRgba32Float:
+        case core::TexelFormat::kRgb10A2Unorm:
+        case core::TexelFormat::kRg11B10Ufloat: {
             return type_mgr.f32();
         }
 
@@ -278,38 +300,27 @@ const core::type::SubgroupMatrix* Manager::subgroup_matrix(SubgroupMatrixKind ki
     return Get<core::type::SubgroupMatrix>(kind, inner, cols, rows);
 }
 
-const core::type::Array* Manager::array(const core::type::Type* elem_ty,
-                                        uint32_t count,
-                                        uint32_t stride /* = 0*/) {
+const core::type::Array* Manager::array(const core::type::Type* elem_ty, uint32_t count) {
     uint32_t implicit_stride = tint::RoundUp(elem_ty->Align(), elem_ty->Size());
-    if (stride == 0) {
-        stride = implicit_stride;
-    }
-    TINT_ASSERT(stride >= implicit_stride);
 
     return Get<core::type::Array>(/* element type */ elem_ty,
                                   /* element count */ Get<ConstantArrayCount>(count),
                                   /* array alignment */ elem_ty->Align(),
-                                  /* array size */ count * stride,
-                                  /* element stride */ stride,
-                                  /* implicit stride */ implicit_stride);
+                                  /* array size */ count * implicit_stride);
 }
 
-const core::type::Array* Manager::runtime_array(const core::type::Type* elem_ty,
-                                                uint32_t stride /* = 0 */) {
+const core::type::Array* Manager::runtime_array(const core::type::Type* elem_ty) {
     uint32_t implicit_stride = tint::RoundUp(elem_ty->Align(), elem_ty->Size());
-    if (stride == 0) {
-        stride = implicit_stride;
-    }
-    TINT_ASSERT(stride >= implicit_stride);
 
     return Get<core::type::Array>(
         /* element type */ elem_ty,
         /* element count */ Get<RuntimeArrayCount>(),
         /* array alignment */ elem_ty->Align(),
-        /* array size */ stride,
-        /* element stride */ stride,
-        /* implicit stride */ implicit_stride);
+        /* array size */ implicit_stride);
+}
+
+const core::type::ResourceBinding* Manager::resource_binding() {
+    return Get<core::type::ResourceBinding>();
 }
 
 const core::type::BindingArray* Manager::binding_array(const core::type::Type* elem_ty,

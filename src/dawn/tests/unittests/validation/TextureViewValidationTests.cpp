@@ -1003,6 +1003,95 @@ TEST_F(TextureViewValidationTest, Usage) {
     }
 }
 
+// Test setting swizzle when creating a texture view requires feature.
+TEST_F(TextureViewValidationTest, SwizzleRequiresFeature) {
+    wgpu::TextureDescriptor textureDesc = {};
+    textureDesc.size = {kWidth, kHeight, kDepth};
+    textureDesc.usage = wgpu::TextureUsage::StorageBinding | wgpu::TextureUsage::RenderAttachment;
+    textureDesc.format = kDefaultTextureFormat;
+    wgpu::Texture texture = device.CreateTexture(&textureDesc);
+
+    wgpu::TextureViewDescriptor viewDesc = {};
+    wgpu::TextureComponentSwizzleDescriptor swizzleDesc = {};
+    viewDesc.nextInChain = &swizzleDesc;
+    ASSERT_DEVICE_ERROR(texture.CreateView(&viewDesc));
+}
+
+enum class SwizzleChannel { R, G, B, A };
+
+class ComponentSwizzleTextureViewValidationTests : public ValidationTest {
+  protected:
+    std::vector<wgpu::FeatureName> GetRequiredFeatures() override {
+        return {wgpu::FeatureName::TextureComponentSwizzle};
+    }
+
+    wgpu::TextureComponentSwizzleDescriptor GetIdenticalButOneSwizzleDesc(SwizzleChannel channel) {
+        wgpu::TextureComponentSwizzleDescriptor desc = {};
+        switch (channel) {
+            case (SwizzleChannel::R): {
+                desc.swizzle.r = wgpu::ComponentSwizzle::Zero;
+                break;
+            }
+            case (SwizzleChannel::G): {
+                desc.swizzle.g = wgpu::ComponentSwizzle::One;
+                break;
+            }
+            case (SwizzleChannel::B): {
+                desc.swizzle.b = wgpu::ComponentSwizzle::R;
+                break;
+            }
+            case (SwizzleChannel::A): {
+                desc.swizzle.a = wgpu::ComponentSwizzle::G;
+                break;
+            }
+        }
+        return desc;
+    }
+};
+
+// Test different swizzle values when creating a texture view.
+TEST_F(ComponentSwizzleTextureViewValidationTests, InvalidSwizzle) {
+    wgpu::TextureDescriptor textureDesc = {};
+    textureDesc.size = {kWidth, kHeight, kDepth};
+    textureDesc.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::RenderAttachment;
+    textureDesc.format = kDefaultTextureFormat;
+
+    wgpu::TextureViewDescriptor viewDesc = {};
+    wgpu::TextureComponentSwizzleDescriptor swizzleDesc = {};
+    viewDesc.nextInChain = &swizzleDesc;
+
+    std::vector<wgpu::TextureUsage> usages = {
+        wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::RenderAttachment,
+        wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::StorageBinding,
+        wgpu::TextureUsage::TextureBinding};
+
+    for (auto textureUsage : usages) {
+        textureDesc.usage = textureUsage;
+        wgpu::Texture texture = device.CreateTexture(&textureDesc);
+
+        // Control case for identical swizzle, always success.
+        {
+            swizzleDesc = wgpu::TextureComponentSwizzleDescriptor{};
+            texture.CreateView(&viewDesc);
+        }
+
+        // Non-identical swizzle cases
+        for (auto changedChannel :
+             {SwizzleChannel::R, SwizzleChannel::G, SwizzleChannel::B, SwizzleChannel::A}) {
+            swizzleDesc = GetIdenticalButOneSwizzleDesc(changedChannel);
+            // CreateView would succeed iif usage doesn't include RENDER_ATTACHMENT
+            // or STORAGE_BINDING.
+            bool expectSuccess = !(textureUsage & (wgpu::TextureUsage::RenderAttachment |
+                                                   wgpu::TextureUsage::StorageBinding));
+            if (expectSuccess) {
+                texture.CreateView(&viewDesc);
+            } else {
+                ASSERT_DEVICE_ERROR(texture.CreateView(&viewDesc));
+            }
+        }
+    }
+}
+
 class D32S8TextureViewValidationTests : public ValidationTest {
   protected:
     std::vector<wgpu::FeatureName> GetRequiredFeatures() override {
@@ -1043,6 +1132,114 @@ TEST_F(D32S8TextureViewValidationTests, TextureViewFormatCompatibility) {
         descriptor.format = wgpu::TextureFormat::RGBA8Unorm;
         ASSERT_DEVICE_ERROR(texture.CreateView(&descriptor));
     }
+}
+
+class TexelBufferViewValidationTest : public ValidationTest {
+  protected:
+    wgpu::Buffer CreateTexelBuffer(uint64_t size, wgpu::BufferUsage usage) {
+        wgpu::BufferDescriptor desc;
+        desc.size = size;
+        desc.usage = usage;
+        return device.CreateBuffer(&desc);
+    }
+};
+
+// Valid texel buffer view creation
+TEST_F(TexelBufferViewValidationTest, CreationSuccess) {
+    constexpr uint64_t kSize = 4 * 4;  // 4 texels of RGBA8Uint
+    wgpu::Buffer buffer =
+        CreateTexelBuffer(kSize, wgpu::BufferUsage::TexelBuffer | wgpu::BufferUsage::CopySrc);
+
+    wgpu::TexelBufferViewDescriptor viewDesc;
+    viewDesc.format = wgpu::TextureFormat::RGBA8Uint;
+    viewDesc.offset = 0;
+    viewDesc.size = kSize;
+
+    buffer.CreateTexelView(&viewDesc);
+}
+
+// Format must not be undefined
+TEST_F(TexelBufferViewValidationTest, UndefinedFormat) {
+    wgpu::Buffer buffer = CreateTexelBuffer(256, wgpu::BufferUsage::TexelBuffer);
+
+    wgpu::TexelBufferViewDescriptor viewDesc;
+    viewDesc.format = wgpu::TextureFormat::Undefined;
+    viewDesc.offset = 0;
+    viewDesc.size = 256;
+
+    ASSERT_DEVICE_ERROR(buffer.CreateTexelView(&viewDesc));
+}
+
+// Offset must be aligned to the texel size
+TEST_F(TexelBufferViewValidationTest, OffsetAlignment) {
+    wgpu::Buffer buffer = CreateTexelBuffer(512, wgpu::BufferUsage::TexelBuffer);
+
+    wgpu::TexelBufferViewDescriptor viewDesc;
+    viewDesc.format = wgpu::TextureFormat::RGBA8Uint;
+    viewDesc.offset = 2;  // Not aligned to 4-byte texel
+    viewDesc.size = 256;
+
+    ASSERT_DEVICE_ERROR(buffer.CreateTexelView(&viewDesc));
+}
+
+// Size must be multiple of texel size
+TEST_F(TexelBufferViewValidationTest, SizeMustBeMultipleOfTexel) {
+    wgpu::Buffer buffer = CreateTexelBuffer(512, wgpu::BufferUsage::TexelBuffer);
+
+    wgpu::TexelBufferViewDescriptor viewDesc;
+    viewDesc.format = wgpu::TextureFormat::RGBA8Uint;
+    viewDesc.offset = 256;
+    viewDesc.size = 3;  // Not multiple of 4-byte texel
+
+    ASSERT_DEVICE_ERROR(buffer.CreateTexelView(&viewDesc));
+}
+
+// Range may not exceed buffer size
+TEST_F(TexelBufferViewValidationTest, RangeExceedsBuffer) {
+    wgpu::Buffer buffer = CreateTexelBuffer(256, wgpu::BufferUsage::TexelBuffer);
+
+    wgpu::TexelBufferViewDescriptor viewDesc;
+    viewDesc.format = wgpu::TextureFormat::RGBA8Uint;
+    viewDesc.offset = 0;
+    viewDesc.size = 512;  // Larger than buffer
+
+    ASSERT_DEVICE_ERROR(buffer.CreateTexelView(&viewDesc));
+}
+
+// Depth formats are not allowed
+TEST_F(TexelBufferViewValidationTest, DepthFormatNotAllowed) {
+    wgpu::Buffer buffer = CreateTexelBuffer(256, wgpu::BufferUsage::TexelBuffer);
+
+    wgpu::TexelBufferViewDescriptor viewDesc;
+    viewDesc.format = wgpu::TextureFormat::Depth24Plus;
+    viewDesc.offset = 0;
+    viewDesc.size = 256;
+
+    ASSERT_DEVICE_ERROR(buffer.CreateTexelView(&viewDesc));
+}
+
+// R32Float is allowed
+TEST_F(TexelBufferViewValidationTest, R32FloatAllowed) {
+    wgpu::Buffer buffer = CreateTexelBuffer(256, wgpu::BufferUsage::TexelBuffer);
+
+    wgpu::TexelBufferViewDescriptor viewDesc;
+    viewDesc.format = wgpu::TextureFormat::R32Float;
+    viewDesc.offset = 0;
+    viewDesc.size = 256;
+
+    buffer.CreateTexelView(&viewDesc);
+}
+
+// RG8Uint is not a supported texel format
+TEST_F(TexelBufferViewValidationTest, ColorFormatNotAllowed) {
+    wgpu::Buffer buffer = CreateTexelBuffer(256, wgpu::BufferUsage::TexelBuffer);
+
+    wgpu::TexelBufferViewDescriptor viewDesc;
+    viewDesc.format = wgpu::TextureFormat::RG8Uint;
+    viewDesc.offset = 0;
+    viewDesc.size = 256;
+
+    ASSERT_DEVICE_ERROR(buffer.CreateTexelView(&viewDesc));
 }
 
 }  // anonymous namespace

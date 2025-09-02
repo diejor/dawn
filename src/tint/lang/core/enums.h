@@ -37,6 +37,8 @@
 #ifndef SRC_TINT_LANG_CORE_ENUMS_H_
 #define SRC_TINT_LANG_CORE_ENUMS_H_
 
+// clang-format off
+
 #include <cstdint>
 
 #include "src/tint/utils/reflection.h"
@@ -79,7 +81,7 @@ constexpr std::string_view kAccessStrings[] = {
 /// Address space of a given pointer.
 enum class AddressSpace : uint8_t {
     kUndefined,
-    kIn,   // Tint-internal enum entry - not parsed
+    kIn,  // Tint-internal enum entry - not parsed
     kOut,  // Tint-internal enum entry - not parsed
     kFunction,
     kHandle,  // Tint-internal enum entry - not parsed
@@ -110,14 +112,21 @@ auto& operator<<(STREAM& out, AddressSpace value) {
 AddressSpace ParseAddressSpace(std::string_view str);
 
 constexpr std::string_view kAddressSpaceStrings[] = {
-    "function", "immediate", "pixel_local", "private", "storage", "uniform", "workgroup",
+    "function",
+    "immediate",
+    "pixel_local",
+    "private",
+    "storage",
+    "uniform",
+    "workgroup",
 };
 
 /// @returns true if the AddressSpace is host-shareable
 /// @param address_space the AddressSpace
 /// @see https://gpuweb.github.io/gpuweb/wgsl.html#host-shareable
 inline bool IsHostShareable(AddressSpace address_space) {
-    return address_space == AddressSpace::kUniform || address_space == AddressSpace::kStorage ||
+    return address_space == AddressSpace::kUniform ||
+           address_space == AddressSpace::kStorage ||
            address_space == AddressSpace::kImmediate;
 }
 
@@ -146,12 +155,15 @@ auto& operator<<(STREAM& out, InterpolationSampling value) {
 
 /// ParseInterpolationSampling parses a InterpolationSampling from a string.
 /// @param str the string to parse
-/// @returns the parsed enum, or InterpolationSampling::kUndefined if the string could not be
-/// parsed.
+/// @returns the parsed enum, or InterpolationSampling::kUndefined if the string could not be parsed.
 InterpolationSampling ParseInterpolationSampling(std::string_view str);
 
 constexpr std::string_view kInterpolationSamplingStrings[] = {
-    "center", "centroid", "either", "first", "sample",
+    "center",
+    "centroid",
+    "either",
+    "first",
+    "sample",
 };
 
 /// The interpolation type.
@@ -222,16 +234,38 @@ constexpr std::string_view kSubgroupMatrixKindStrings[] = {
 enum class TexelFormat : uint8_t {
     kUndefined,
     kBgra8Unorm,
+    kR16Float,
+    kR16Sint,
+    kR16Snorm,
+    kR16Uint,
+    kR16Unorm,
     kR32Float,
     kR32Sint,
     kR32Uint,
+    kR8Sint,
+    kR8Snorm,
+    kR8Uint,
     kR8Unorm,
+    kRg11B10Ufloat,
+    kRg16Float,
+    kRg16Sint,
+    kRg16Snorm,
+    kRg16Uint,
+    kRg16Unorm,
     kRg32Float,
     kRg32Sint,
     kRg32Uint,
+    kRg8Sint,
+    kRg8Snorm,
+    kRg8Uint,
+    kRg8Unorm,
+    kRgb10A2Uint,
+    kRgb10A2Unorm,
     kRgba16Float,
     kRgba16Sint,
+    kRgba16Snorm,
     kRgba16Uint,
+    kRgba16Unorm,
     kRgba32Float,
     kRgba32Sint,
     kRgba32Uint,
@@ -260,9 +294,46 @@ auto& operator<<(STREAM& out, TexelFormat value) {
 TexelFormat ParseTexelFormat(std::string_view str);
 
 constexpr std::string_view kTexelFormatStrings[] = {
-    "bgra8unorm", "r32float",   "r32sint",     "r32uint",    "r8unorm",    "rg32float",
-    "rg32sint",   "rg32uint",   "rgba16float", "rgba16sint", "rgba16uint", "rgba32float",
-    "rgba32sint", "rgba32uint", "rgba8sint",   "rgba8snorm", "rgba8uint",  "rgba8unorm",
+    "bgra8unorm",
+    "r16float",
+    "r16sint",
+    "r16snorm",
+    "r16uint",
+    "r16unorm",
+    "r32float",
+    "r32sint",
+    "r32uint",
+    "r8sint",
+    "r8snorm",
+    "r8uint",
+    "r8unorm",
+    "rg11b10ufloat",
+    "rg16float",
+    "rg16sint",
+    "rg16snorm",
+    "rg16uint",
+    "rg16unorm",
+    "rg32float",
+    "rg32sint",
+    "rg32uint",
+    "rg8sint",
+    "rg8snorm",
+    "rg8uint",
+    "rg8unorm",
+    "rgb10a2uint",
+    "rgb10a2unorm",
+    "rgba16float",
+    "rgba16sint",
+    "rgba16snorm",
+    "rgba16uint",
+    "rgba16unorm",
+    "rgba32float",
+    "rgba32sint",
+    "rgba32uint",
+    "rgba8sint",
+    "rgba8snorm",
+    "rgba8uint",
+    "rgba8unorm",
 };
 
 /// An enumerator of builtin types.
@@ -331,11 +402,13 @@ enum class BuiltinType : uint8_t {
     kMat4X4F,
     kMat4X4H,
     kPtr,
+    kResourceBinding,
     kSampler,
     kSamplerComparison,
     kSubgroupMatrixLeft,
     kSubgroupMatrixResult,
     kSubgroupMatrixRight,
+    kTexelBuffer,
     kTexture1D,
     kTexture2D,
     kTexture2DArray,
@@ -454,11 +527,13 @@ constexpr std::string_view kBuiltinTypeStrings[] = {
     "mat4x4f",
     "mat4x4h",
     "ptr",
+    "resource_binding",
     "sampler",
     "sampler_comparison",
     "subgroup_matrix_left",
     "subgroup_matrix_result",
     "subgroup_matrix_right",
+    "texel_buffer",
     "texture_1d",
     "texture_2d",
     "texture_2d_array",
@@ -499,7 +574,8 @@ constexpr std::string_view kBuiltinTypeStrings[] = {
 enum class BuiltinValue : uint8_t {
     kUndefined,
     kCullDistance,  // Tint-internal enum entry - not parsed
-    kPointSize,     // Tint-internal enum entry - not parsed
+    kPointSize,  // Tint-internal enum entry - not parsed
+    kBarycentricCoord,
     kClipDistances,
     kFragDepth,
     kFrontFacing,
@@ -509,6 +585,7 @@ enum class BuiltinValue : uint8_t {
     kLocalInvocationIndex,
     kNumWorkgroups,
     kPosition,
+    kPrimitiveIndex,
     kSampleIndex,
     kSampleMask,
     kSubgroupId,
@@ -537,11 +614,23 @@ auto& operator<<(STREAM& out, BuiltinValue value) {
 BuiltinValue ParseBuiltinValue(std::string_view str);
 
 constexpr std::string_view kBuiltinValueStrings[] = {
-    "clip_distances",         "frag_depth",     "front_facing",
-    "global_invocation_id",   "instance_index", "local_invocation_id",
-    "local_invocation_index", "num_workgroups", "position",
-    "sample_index",           "sample_mask",    "subgroup_id",
-    "subgroup_invocation_id", "subgroup_size",  "vertex_index",
+    "barycentric_coord",
+    "clip_distances",
+    "frag_depth",
+    "front_facing",
+    "global_invocation_id",
+    "instance_index",
+    "local_invocation_id",
+    "local_invocation_index",
+    "num_workgroups",
+    "position",
+    "primitive_index",
+    "sample_index",
+    "sample_mask",
+    "subgroup_id",
+    "subgroup_invocation_id",
+    "subgroup_size",
+    "vertex_index",
     "workgroup_id",
 };
 
@@ -624,15 +713,18 @@ enum class ParameterUsage : uint8_t {
     kDelta,
     kDepth,
     kDepthRef,
+    kDir,
     kDref,
     kE,
     kElements,
     kExp,
+    kGroupOperation,
     kHeight,
     kI,
     kId,
     kImage,
     kImageOperands,
+    kIndex,
     kInputAttachment,
     kInsert,
     kLevel,
@@ -648,6 +740,7 @@ enum class ParameterUsage : uint8_t {
     kSampleIndex,
     kSampler,
     kSamples,
+    kScope,
     kSourceLaneIndex,
     kTexel,
     kTexture,
@@ -829,6 +922,9 @@ enum class BuiltinFn : uint8_t {
     kSubgroupMatrixStore,
     kSubgroupMatrixMultiply,
     kSubgroupMatrixMultiplyAccumulate,
+    kPrint,
+    kHasBinding,
+    kGetBinding,
     kNone,
 };
 
@@ -847,7 +943,7 @@ const char* str(BuiltinFn i);
 template <typename STREAM>
     requires(traits::IsOStream<STREAM>)
 auto& operator<<(STREAM& o, BuiltinFn i) {
-    return o << str(i);
+  return o << str(i);
 }
 
 /// All builtin functions
@@ -1001,6 +1097,9 @@ constexpr BuiltinFn kBuiltinFns[] = {
     BuiltinFn::kSubgroupMatrixStore,
     BuiltinFn::kSubgroupMatrixMultiply,
     BuiltinFn::kSubgroupMatrixMultiplyAccumulate,
+    BuiltinFn::kPrint,
+    BuiltinFn::kHasBinding,
+    BuiltinFn::kGetBinding,
 };
 
 /// All builtin function names
@@ -1154,6 +1253,9 @@ constexpr const char* kBuiltinFnStrings[] = {
     "subgroupMatrixStore",
     "subgroupMatrixMultiply",
     "subgroupMatrixMultiplyAccumulate",
+    "print",
+    "hasBinding",
+    "getBinding",
 };
 
 /// Determines if the given `f` is a coarse derivative.
@@ -1228,5 +1330,7 @@ TINT_REFLECT_ENUM_RANGE(core::Access, kUndefined, kWrite);
 TINT_REFLECT_ENUM_RANGE(core::SubgroupMatrixKind, kUndefined, kRight);
 
 }  // namespace tint
+
+// clang-format on
 
 #endif  // SRC_TINT_LANG_CORE_ENUMS_H_

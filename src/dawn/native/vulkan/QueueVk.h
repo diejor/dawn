@@ -52,9 +52,9 @@ class Queue final : public QueueBase {
 
     CommandRecordingContext* GetPendingRecordingContext(SubmitMode submitMode = SubmitMode::Normal);
     MaybeError SplitRecordingContext(CommandRecordingContext* recordingContext);
-    void RecycleCompletedCommands(ExecutionSerial completedSerial);
 
-    ResultOrError<bool> WaitForQueueSerial(ExecutionSerial serial, Nanoseconds timeout) override;
+    ResultOrError<ExecutionSerial> WaitForQueueSerialImpl(ExecutionSerial waitSerial,
+                                                          Nanoseconds timeout) override;
 
   private:
     Queue(Device* device, const QueueDescriptor* descriptor, uint32_t family);
@@ -67,7 +67,7 @@ class Queue final : public QueueBase {
     bool HasPendingCommands() const override;
     ResultOrError<ExecutionSerial> CheckAndUpdateCompletedSerials() override;
     void ForceEventualFlushOfCommands() override;
-    MaybeError WaitForIdleForDestruction() override;
+    MaybeError WaitForIdleForDestructionImpl() override;
     MaybeError SubmitPendingCommandsImpl() override;
     void DestroyImpl() override;
 
@@ -87,9 +87,8 @@ class Queue final : public QueueBase {
     MaybeError PrepareRecordingContext();
     ResultOrError<CommandPoolAndBuffer> BeginVkCommandBuffer();
 
-    SerialQueue<ExecutionSerial, CommandPoolAndBuffer> mCommandsInFlight;
     // Command pools in the unused list haven't been reset yet.
-    std::vector<CommandPoolAndBuffer> mUnusedCommands;
+    MutexProtected<std::vector<CommandPoolAndBuffer>> mUnusedCommands;
     // There is always a valid recording context stored in mRecordingContext
     CommandRecordingContext mRecordingContext;
 

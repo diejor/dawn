@@ -398,6 +398,7 @@ func validate(fqn sem.FullyQualifiedName, uses *sem.StageUses) bool {
 			strings.Contains(elTyName, "u8"),
 			strings.Contains(elTyName, "sampler"),
 			strings.Contains(elTyName, "texture"),
+			strings.Contains(elTyName, "resource_binding"),
 			IsAbstract(DeepestElementType(elTy)):
 			return false
 		}
@@ -445,6 +446,11 @@ func validate(fqn sem.FullyQualifiedName, uses *sem.StageUses) bool {
 				return false
 			}
 		default:
+			return false
+		}
+	case "texel_buffer":
+		access := fqn.TemplateArguments[1].(sem.FullyQualifiedName).Target.(*sem.EnumEntry).Name
+		if access != "read_write" && access != "read" {
 			return false
 		}
 	}

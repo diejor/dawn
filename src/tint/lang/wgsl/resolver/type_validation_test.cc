@@ -357,24 +357,15 @@ TEST_F(ResolverTypeValidationTest, ArraySize_NestedStorageBufferLargeArray) {
 
 TEST_F(ResolverTypeValidationTest, ArraySize_TooBig_ImplicitStride) {
     // struct S {
-    //   @offset(800000) a : f32
+    //   @size(800000) a : f32
     // }
     // var<private> a : array<S, 65535>;
-    Structure("S", Vector{Member(Source{{12, 34}}, "a", ty.f32(), Vector{MemberOffset(800000_a)})});
+    Structure("S", Vector{Member(Source{{12, 34}}, "a", ty.f32(), Vector{MemberSize(800000_a)})});
     GlobalVar("a", ty.array(ty(Source{{12, 30}}, "S"), Expr(Source{{12, 34}}, 65535_a)),
               core::AddressSpace::kPrivate);
     EXPECT_FALSE(r()->Resolve());
     EXPECT_EQ(r()->error(),
-              "12:34 error: array byte size (0xc34f7cafc) must not exceed 0xffffffff bytes");
-}
-
-TEST_F(ResolverTypeValidationTest, ArraySize_TooBig_ExplicitStride) {
-    // var<private> a : @stride(8000000) array<f32, 65535>;
-    GlobalVar("a", ty.array(ty.f32(), Expr(Source{{12, 34}}, 65535_a), Vector{Stride(8000000)}),
-              core::AddressSpace::kPrivate);
-    EXPECT_FALSE(r()->Resolve());
-    EXPECT_EQ(r()->error(),
-              "12:34 error: array byte size (0x7a1185ee00) must not exceed 0xffffffff bytes");
+              "12:34 error: array byte size (0xc34f3cb00) must not exceed 0xffffffff bytes");
 }
 
 TEST_F(ResolverTypeValidationTest, ArraySize_NamedOverride_PrivateVar) {
@@ -885,15 +876,6 @@ TEST_F(ResolverTypeValidationTest, ArrayOfNonStorableType) {
               "12:34 error: texture_2d<f32> cannot be used as an element type of an array");
 }
 
-TEST_F(ResolverTypeValidationTest, ArrayOfNonStorableTypeWithStride) {
-    auto ptr_ty = ty.ptr<uniform, u32>(Source{{12, 34}});
-    GlobalVar("arr", ty.array(ptr_ty, 4_i, Vector{Stride(16)}), core::AddressSpace::kPrivate);
-
-    EXPECT_FALSE(r()->Resolve());
-    EXPECT_EQ(r()->error(),
-              "12:34 error: ptr<uniform, u32, read> cannot be used as an element type of an array");
-}
-
 namespace GetCanonicalTests {
 struct Params {
     builder::ast_type_func_ptr create_ast_type;
@@ -1099,23 +1081,43 @@ struct FormatParams {
     bool is_valid;
 };
 
-static constexpr FormatParams format_cases[] = {FormatParams{core::TexelFormat::kBgra8Unorm, true},
-                                                FormatParams{core::TexelFormat::kR32Float, true},
-                                                FormatParams{core::TexelFormat::kR32Sint, true},
-                                                FormatParams{core::TexelFormat::kR32Uint, true},
-                                                FormatParams{core::TexelFormat::kRg32Float, true},
-                                                FormatParams{core::TexelFormat::kRg32Sint, true},
-                                                FormatParams{core::TexelFormat::kRg32Uint, true},
-                                                FormatParams{core::TexelFormat::kRgba16Float, true},
-                                                FormatParams{core::TexelFormat::kRgba16Sint, true},
-                                                FormatParams{core::TexelFormat::kRgba16Uint, true},
-                                                FormatParams{core::TexelFormat::kRgba32Float, true},
-                                                FormatParams{core::TexelFormat::kRgba32Sint, true},
-                                                FormatParams{core::TexelFormat::kRgba32Uint, true},
-                                                FormatParams{core::TexelFormat::kRgba8Sint, true},
-                                                FormatParams{core::TexelFormat::kRgba8Snorm, true},
-                                                FormatParams{core::TexelFormat::kRgba8Uint, true},
-                                                FormatParams{core::TexelFormat::kRgba8Unorm, true}};
+static constexpr FormatParams format_cases[] = {
+    FormatParams{core::TexelFormat::kBgra8Unorm, true},
+    FormatParams{core::TexelFormat::kR32Float, true},
+    FormatParams{core::TexelFormat::kR32Sint, true},
+    FormatParams{core::TexelFormat::kR32Uint, true},
+    FormatParams{core::TexelFormat::kRg32Float, true},
+    FormatParams{core::TexelFormat::kRg32Sint, true},
+    FormatParams{core::TexelFormat::kRg32Uint, true},
+    FormatParams{core::TexelFormat::kRgba16Float, true},
+    FormatParams{core::TexelFormat::kRgba16Sint, true},
+    FormatParams{core::TexelFormat::kRgba16Uint, true},
+    FormatParams{core::TexelFormat::kRgba32Float, true},
+    FormatParams{core::TexelFormat::kRgba32Sint, true},
+    FormatParams{core::TexelFormat::kRgba32Uint, true},
+    FormatParams{core::TexelFormat::kRgba8Sint, true},
+    FormatParams{core::TexelFormat::kRgba8Snorm, true},
+    FormatParams{core::TexelFormat::kRgba8Uint, true},
+    FormatParams{core::TexelFormat::kRgba8Unorm, true},
+    // From "texture-formats-tier1"
+    FormatParams{core::TexelFormat::kR8Unorm, true},
+    FormatParams{core::TexelFormat::kR8Snorm, true},
+    FormatParams{core::TexelFormat::kR8Uint, true},
+    FormatParams{core::TexelFormat::kR8Sint, true},
+    FormatParams{core::TexelFormat::kRg8Unorm, true},
+    FormatParams{core::TexelFormat::kRg8Snorm, true},
+    FormatParams{core::TexelFormat::kRg8Uint, true},
+    FormatParams{core::TexelFormat::kRg8Sint, true},
+    FormatParams{core::TexelFormat::kR16Uint, true},
+    FormatParams{core::TexelFormat::kR16Sint, true},
+    FormatParams{core::TexelFormat::kR16Float, true},
+    FormatParams{core::TexelFormat::kRg16Uint, true},
+    FormatParams{core::TexelFormat::kRg16Sint, true},
+    FormatParams{core::TexelFormat::kRg16Float, true},
+    FormatParams{core::TexelFormat::kRgb10A2Uint, true},
+    FormatParams{core::TexelFormat::kRgb10A2Unorm, true},
+    FormatParams{core::TexelFormat::kRg11B10Ufloat, true},
+};
 
 using StorageTextureFormatTest = ResolverTestWithParam<FormatParams>;
 TEST_P(StorageTextureFormatTest, All) {

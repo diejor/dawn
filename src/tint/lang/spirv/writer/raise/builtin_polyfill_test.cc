@@ -1286,6 +1286,308 @@ TEST_F(SpirvWriter_BuiltinPolyfillTest, Select_ScalarCondition_VectorOperands_Sp
     EXPECT_EQ(expect, str());
 }
 
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleDown_Clamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* delta = b.FunctionParam("delta", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, delta});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleDown, val, delta);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleDown %val, %delta
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:u32 = and %delta, 127u
+    %5:i32 = subgroupShuffleDown %val, %4
+    ret %5
+  }
+}
+)";
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = true};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleDown_SignedDelta_Clamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* delta = b.FunctionParam("delta", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, delta});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleDown, val, delta);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleDown %val, %delta
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:u32 = and %delta, 127u
+    %5:i32 = subgroupShuffleDown %val, %4
+    ret %5
+  }
+}
+)";
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = true};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleDown_Unclamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* delta = b.FunctionParam("delta", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, delta});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleDown, val, delta);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleDown %val, %delta
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = false};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(src, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleDown_SignedDelta_Unclamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* delta = b.FunctionParam("delta", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, delta});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleDown, val, delta);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleDown %val, %delta
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleDown %val, %delta
+    ret %4
+  }
+}
+)";
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = false};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleUp_Clamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* delta = b.FunctionParam("delta", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, delta});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleUp, val, delta);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleUp %val, %delta
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:u32 = and %delta, 127u
+    %5:i32 = subgroupShuffleUp %val, %4
+    ret %5
+  }
+}
+)";
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = true};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleUp_SignedDelta_Clamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* delta = b.FunctionParam("delta", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, delta});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleUp, val, delta);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleUp %val, %delta
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:u32 = and %delta, 127u
+    %5:i32 = subgroupShuffleUp %val, %4
+    ret %5
+  }
+}
+)";
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = true};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleUp_Unclamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* delta = b.FunctionParam("delta", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, delta});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleUp, val, delta);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %delta:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleUp %val, %delta
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = false};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(src, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleXor_Clamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* mask = b.FunctionParam("mask", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, mask});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleXor, val, mask);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %mask:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleXor %val, %mask
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%val:i32, %mask:u32):i32 {
+  $B1: {
+    %4:u32 = and %mask, 127u
+    %5:i32 = subgroupShuffleXor %val, %4
+    ret %5
+  }
+}
+)";
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = true};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleXor_Unclamped) {
+    auto* val = b.FunctionParam("val", ty.i32());
+    auto* mask = b.FunctionParam("mask", ty.u32());
+    auto* func = b.Function("foo", ty.i32());
+    func->SetParams({val, mask});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffleXor, val, mask);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%val:i32, %mask:u32):i32 {
+  $B1: {
+    %4:i32 = subgroupShuffleXor %val, %mask
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    PolyfillConfig config{.subgroup_shuffle_clamped = false};
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(src, str());
+}
+
 TEST_F(SpirvWriter_BuiltinPolyfillTest, TextureLoad_2D) {
     capabilities = core::ir::Capability::kAllowNonCoreTypes;
 
@@ -1565,6 +1867,123 @@ TEST_F(SpirvWriter_BuiltinPolyfillTest, TextureLoad_Storage) {
   $B1: {
     %4:vec4<u32> = spirv.image_read %t, %coords, 0u
     ret %4
+  }
+}
+)";
+
+    PolyfillConfig config;
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, TextureLoad_TexelBuffer) {
+    capabilities = core::ir::Capability::kAllowNonCoreTypes;
+
+    auto format = core::TexelFormat::kR32Uint;
+    auto* t = b.FunctionParam("t", ty.texel_buffer(format, core::Access::kReadWrite));
+    auto* coords = b.FunctionParam("coords", ty.u32());
+    auto* func = b.Function("foo", ty.vec4<u32>());
+    func->SetParams({t, coords});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.vec4<u32>(), core::BuiltinFn::kTextureLoad, t, coords);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%t:texel_buffer<r32uint, read_write>, %coords:u32):vec4<u32> {
+  $B1: {
+    %4:vec4<u32> = textureLoad %t, %coords
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%t:spirv.image<u32, buffer, not_depth, non_arrayed, single_sampled, rw_op_compatible, r32uint, read_write>, %coords:u32):vec4<u32> {
+  $B1: {
+    %4:vec4<u32> = spirv.image_read %t, %coords, 0u
+    ret %4
+  }
+}
+)";
+
+    PolyfillConfig config;
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, TextureStore_TexelBuffer) {
+    capabilities = core::ir::Capability::kAllowNonCoreTypes;
+
+    auto format = core::TexelFormat::kR32Uint;
+    auto* t = b.FunctionParam("t", ty.texel_buffer(format, core::Access::kReadWrite));
+    auto* coords = b.FunctionParam("coords", ty.u32());
+    auto* texel = b.FunctionParam("texel", ty.vec4<u32>());
+    auto* func = b.Function("foo", ty.void_());
+    func->SetParams({t, coords, texel});
+
+    b.Append(func->Block(), [&] {
+        b.Call(ty.void_(), core::BuiltinFn::kTextureStore, t, coords, texel);
+        b.Return(func);
+    });
+
+    auto* src = R"(
+%foo = func(%t:texel_buffer<r32uint, read_write>, %coords:u32, %texel:vec4<u32>):void {
+  $B1: {
+    %5:void = textureStore %t, %coords, %texel
+    ret
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%t:spirv.image<u32, buffer, not_depth, non_arrayed, single_sampled, rw_op_compatible, r32uint, read_write>, %coords:u32, %texel:vec4<u32>):void {
+  $B1: {
+    %5:void = spirv.image_write %t, %coords, %texel, 0u
+    ret
+  }
+}
+)";
+
+    PolyfillConfig config;
+    Run(BuiltinPolyfill, config);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, TextureDimensions_TexelBuffer) {
+    capabilities = core::ir::Capability::kAllowNonCoreTypes;
+
+    auto* t = b.FunctionParam(
+        "t", ty.texel_buffer(core::TexelFormat::kR32Uint, core::Access::kReadWrite));
+    auto* func = b.Function("foo", ty.u32());
+    func->SetParams({t});
+
+    b.Append(func->Block(), [&] {
+        auto* result = b.Call(ty.u32(), core::BuiltinFn::kTextureDimensions, t);
+        b.Return(func, result);
+    });
+
+    auto* src = R"(
+%foo = func(%t:texel_buffer<r32uint, read_write>):u32 {
+  $B1: {
+    %3:u32 = textureDimensions %t
+    ret %3
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = func(%t:spirv.image<u32, buffer, not_depth, non_arrayed, single_sampled, rw_op_compatible, r32uint, read_write>):u32 {
+  $B1: {
+    %3:u32 = spirv.image_query_size<u32> %t
+    ret %3
   }
 }
 )";
@@ -4002,10 +4421,11 @@ TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupMatrixLoad_Storage_ColMajor_I8) 
     auto* expect = R"(
 %foo = func(%p:ptr<storage, array<i32, 256>, read_write>):subgroup_matrix_result<i8, 8, 8> {
   $B1: {
-    %3:ptr<storage, i32, read_write> = access %p, 64u
-    %4:u32 = div 32u, 4u
-    %5:subgroup_matrix_result<i8, 8, 8> = spirv.cooperative_matrix_load<subgroup_matrix_result<i8, 8, 8>> %3, 1u, %4, 32u
-    ret %5
+    %3:u32 = div 32u, 4u
+    %4:u32 = div 64u, 4u
+    %5:ptr<storage, i32, read_write> = access %p, %4
+    %6:subgroup_matrix_result<i8, 8, 8> = spirv.cooperative_matrix_load<subgroup_matrix_result<i8, 8, 8>> %5, 1u, %3, 32u
+    ret %6
   }
 }
 )";
@@ -4040,10 +4460,11 @@ TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupMatrixLoad_Workgroup_RowMajor_U8
     auto* expect = R"(
 %foo = func(%p:ptr<workgroup, array<u32, 256>, read_write>):subgroup_matrix_result<u8, 8, 8> {
   $B1: {
-    %3:ptr<workgroup, u32, read_write> = access %p, 64u
-    %4:u32 = div 32u, 4u
-    %5:subgroup_matrix_result<u8, 8, 8> = spirv.cooperative_matrix_load<subgroup_matrix_result<u8, 8, 8>> %3, 0u, %4, 32u
-    ret %5
+    %3:u32 = div 32u, 4u
+    %4:u32 = div 64u, 4u
+    %5:ptr<workgroup, u32, read_write> = access %p, %4
+    %6:subgroup_matrix_result<u8, 8, 8> = spirv.cooperative_matrix_load<subgroup_matrix_result<u8, 8, 8>> %5, 0u, %3, 32u
+    ret %6
   }
 }
 )";
@@ -4149,8 +4570,10 @@ TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupMatrixStore_Storage_ColMajor_I8)
     auto* expect = R"(
 %foo = func(%p:ptr<storage, array<i32, 256>, read_write>, %m:subgroup_matrix_result<i8, 8, 8>):void {
   $B1: {
-    %4:ptr<storage, i32, read_write> = access %p, 64u
-    %5:void = spirv.cooperative_matrix_store %4, %m, 1u, 32u, 32u
+    %4:u32 = div 32u, 4u
+    %5:u32 = div 64u, 4u
+    %6:ptr<storage, i32, read_write> = access %p, %5
+    %7:void = spirv.cooperative_matrix_store %6, %m, 1u, %4, 32u
     ret
   }
 }
@@ -4185,8 +4608,10 @@ TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupMatrixStore_Workgroup_RowMajor_U
     auto* expect = R"(
 %foo = func(%p:ptr<workgroup, array<u32, 256>, read_write>, %m:subgroup_matrix_result<u8, 8, 8>):void {
   $B1: {
-    %4:ptr<workgroup, u32, read_write> = access %p, 64u
-    %5:void = spirv.cooperative_matrix_store %4, %m, 0u, 32u, 32u
+    %4:u32 = div 32u, 4u
+    %5:u32 = div 64u, 4u
+    %6:ptr<workgroup, u32, read_write> = access %p, %5
+    %7:void = spirv.cooperative_matrix_store %6, %m, 0u, %4, 32u
     ret
   }
 }
@@ -4651,6 +5076,193 @@ TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupMatrixMultiplyAccumulate_U8_U32)
     PolyfillConfig config{.use_vulkan_memory_model = true};
     Run(BuiltinPolyfill, config);
 
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleClamped_NoPolyfill) {
+    auto* func = b.Function("foo", ty.void_());
+    auto* arg1 = b.FunctionParam("arg1", ty.i32());
+    auto* arg2 = b.FunctionParam("arg2", ty.i32());
+    func->SetParams({arg1, arg2});
+
+    b.Append(func->Block(), [&] {
+        b.Let("a", b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffle, arg1, arg2));
+        b.Return(func);
+    });
+    auto* src = R"(
+%foo = func(%arg1:i32, %arg2:i32):void {
+  $B1: {
+    %4:i32 = subgroupShuffle %arg1, %arg2
+    %a:i32 = let %4
+    ret
+  }
+}
+)";
+
+    auto* expect = R"(
+%foo = func(%arg1:i32, %arg2:i32):void {
+  $B1: {
+    %4:u32 = bitcast %arg2
+    %5:i32 = subgroupShuffle %arg1, %4
+    %a:i32 = let %5
+    ret
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    PolyfillConfig config;
+    config.subgroup_shuffle_clamped = false;
+    Run(BuiltinPolyfill, config);
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleClamped_I32) {
+    auto* func = b.Function("foo", ty.void_());
+    auto* arg1 = b.FunctionParam("arg1", ty.i32());
+    auto* arg2 = b.FunctionParam("arg2", ty.i32());
+    func->SetParams({arg1, arg2});
+    b.Append(func->Block(), [&] {
+        b.Let("a", b.Call(ty.i32(), core::BuiltinFn::kSubgroupShuffle, arg1, arg2));
+        b.Return(func);
+    });
+    auto* src = R"(
+%foo = func(%arg1:i32, %arg2:i32):void {
+  $B1: {
+    %4:i32 = subgroupShuffle %arg1, %arg2
+    %a:i32 = let %4
+    ret
+  }
+}
+)";
+    auto* expect = R"(
+%foo = func(%arg1:i32, %arg2:i32):void {
+  $B1: {
+    %4:u32 = bitcast %arg2
+    %5:u32 = and %4, 127u
+    %6:i32 = subgroupShuffle %arg1, %5
+    %a:i32 = let %6
+    ret
+  }
+}
+)";
+
+    EXPECT_EQ(src, str());
+
+    PolyfillConfig config;
+    config.subgroup_shuffle_clamped = true;
+    Run(BuiltinPolyfill, config);
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleClamped_U32) {
+    auto* func = b.Function("foo", ty.void_());
+    auto* arg1 = b.FunctionParam("arg1", ty.u32());
+    auto* arg2 = b.FunctionParam("arg2", ty.u32());
+    func->SetParams({arg1, arg2});
+    b.Append(func->Block(), [&] {
+        b.Let("a", b.Call(ty.u32(), core::BuiltinFn::kSubgroupShuffle, arg1, arg2));
+        b.Return(func);
+    });
+    auto* src = R"(
+%foo = func(%arg1:u32, %arg2:u32):void {
+  $B1: {
+    %4:u32 = subgroupShuffle %arg1, %arg2
+    %a:u32 = let %4
+    ret
+  }
+}
+)";
+    auto* expect = R"(
+%foo = func(%arg1:u32, %arg2:u32):void {
+  $B1: {
+    %4:u32 = and %arg2, 127u
+    %5:u32 = subgroupShuffle %arg1, %4
+    %a:u32 = let %5
+    ret
+  }
+}
+)";
+
+    EXPECT_EQ(src, str());
+
+    PolyfillConfig config;
+    config.subgroup_shuffle_clamped = true;
+    Run(BuiltinPolyfill, config);
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleClamped_F32) {
+    auto* func = b.Function("foo", ty.void_());
+    auto* arg1 = b.FunctionParam("arg1", ty.f32());
+    auto* arg2 = b.FunctionParam("arg2", ty.u32());
+    func->SetParams({arg1, arg2});
+    b.Append(func->Block(), [&] {
+        b.Let("a", b.Call(ty.f32(), core::BuiltinFn::kSubgroupShuffle, arg1, arg2));
+        b.Return(func);
+    });
+    auto* src = R"(
+%foo = func(%arg1:f32, %arg2:u32):void {
+  $B1: {
+    %4:f32 = subgroupShuffle %arg1, %arg2
+    %a:f32 = let %4
+    ret
+  }
+}
+)";
+    auto* expect = R"(
+%foo = func(%arg1:f32, %arg2:u32):void {
+  $B1: {
+    %4:u32 = and %arg2, 127u
+    %5:f32 = subgroupShuffle %arg1, %4
+    %a:f32 = let %5
+    ret
+  }
+}
+)";
+
+    EXPECT_EQ(src, str());
+
+    PolyfillConfig config;
+    config.subgroup_shuffle_clamped = true;
+    Run(BuiltinPolyfill, config);
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvWriter_BuiltinPolyfillTest, SubgroupShuffleClamped_Vec2F32) {
+    auto* func = b.Function("foo", ty.void_());
+    auto* arg1 = b.FunctionParam("arg1", ty.vec2<f32>());
+    auto* arg2 = b.FunctionParam("arg2", ty.u32());
+    func->SetParams({arg1, arg2});
+    b.Append(func->Block(), [&] {
+        b.Let("a", b.Call(ty.vec2<f32>(), core::BuiltinFn::kSubgroupShuffle, arg1, arg2));
+        b.Return(func);
+    });
+    auto* src = R"(
+%foo = func(%arg1:vec2<f32>, %arg2:u32):void {
+  $B1: {
+    %4:vec2<f32> = subgroupShuffle %arg1, %arg2
+    %a:vec2<f32> = let %4
+    ret
+  }
+}
+)";
+    auto* expect = R"(
+%foo = func(%arg1:vec2<f32>, %arg2:u32):void {
+  $B1: {
+    %4:u32 = and %arg2, 127u
+    %5:vec2<f32> = subgroupShuffle %arg1, %4
+    %a:vec2<f32> = let %5
+    ret
+  }
+}
+)";
+
+    EXPECT_EQ(src, str());
+
+    PolyfillConfig config;
+    config.subgroup_shuffle_clamped = true;
+    Run(BuiltinPolyfill, config);
     EXPECT_EQ(expect, str());
 }
 

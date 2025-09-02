@@ -35,6 +35,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "dawn/common/Constants.h"
 #include "dawn/utils/TextureUtils.h"
 
@@ -42,12 +43,6 @@ namespace dawn::utils {
 
 enum Expectation { Success, Failure };
 
-#if TINT_BUILD_SPV_READER
-wgpu::ShaderModule CreateShaderModuleFromASM(
-    const wgpu::Device& device,
-    const char* source,
-    wgpu::DawnShaderModuleSPIRVOptionsDescriptor* spirv_options = nullptr);
-#endif
 wgpu::ShaderModule CreateShaderModule(const wgpu::Device& device, const char* source);
 wgpu::ShaderModule CreateShaderModule(const wgpu::Device& device, const std::string& source);
 
@@ -123,6 +118,7 @@ wgpu::PipelineLayout MakePipelineLayout(const wgpu::Device& device,
 
 #ifndef __EMSCRIPTEN__
 extern wgpu::ExternalTextureBindingLayout kExternalTextureBindingLayout;
+extern wgpu::TexelBufferBindingLayout kTexelBufferBindingLayout;
 #endif  // __EMSCRIPTEN__
 
 // Helpers to make creating bind group layouts look nicer:
@@ -158,8 +154,10 @@ struct BindingLayoutEntryInitializationHelper : wgpu::BindGroupLayoutEntry {
     BindingLayoutEntryInitializationHelper(uint32_t entryBinding,
                                            wgpu::ShaderStage entryVisibility,
                                            wgpu::ExternalTextureBindingLayout* bindingLayout);
+    BindingLayoutEntryInitializationHelper(uint32_t entryBinding,
+                                           wgpu::ShaderStage entryVisibility,
+                                           wgpu::TexelBufferBindingLayout* bindingLayout);
 #endif  // __EMSCRIPTEN__
-
     // NOLINTNEXTLINE(runtime/explicit)
     BindingLayoutEntryInitializationHelper(const wgpu::BindGroupLayoutEntry& entry);
 };
@@ -183,6 +181,7 @@ struct BindingInitializationHelper {
     BindingInitializationHelper(uint32_t binding, const wgpu::TextureView& textureView);
 #ifndef __EMSCRIPTEN__
     BindingInitializationHelper(uint32_t binding, const wgpu::ExternalTexture& externalTexture);
+    BindingInitializationHelper(uint32_t binding, const wgpu::TexelBufferView& texelBufferView);
 #endif  // __EMSCRIPTEN__
     BindingInitializationHelper(uint32_t binding,
                                 const wgpu::Buffer& buffer,
@@ -198,7 +197,8 @@ struct BindingInitializationHelper {
     wgpu::TextureView textureView;
     wgpu::Buffer buffer;
 #ifndef __EMSCRIPTEN__
-    wgpu::ExternalTextureBindingEntry externalTextureBindingEntry;
+    mutable wgpu::ExternalTextureBindingEntry externalTextureBindingEntry;
+    mutable wgpu::TexelBufferBindingEntry texelBufferBindingEntry = {};
 #endif  // __EMSCRIPTEN__
     uint64_t offset = 0;
     uint64_t size = 0;
@@ -219,6 +219,14 @@ ColorSpaceConversionInfo GetYUVBT709ToRGBSRGBColorSpaceConversionInfo();
 ColorSpaceConversionInfo GetNoopRGBColorSpaceConversionInfo();
 
 bool BackendRequiresCompat(wgpu::BackendType backend);
+
+absl::flat_hash_set<wgpu::FeatureName> FeatureAndImplicitlyEnabled(wgpu::FeatureName featureName);
+
+int8_t ConvertFloatToSnorm8(float value);
+
+int16_t ConvertFloatToSnorm16(float value);
+
+uint16_t ConvertFloatToUnorm16(float value);
 
 }  // namespace dawn::utils
 

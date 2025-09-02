@@ -44,6 +44,7 @@
 #include "src/tint/lang/core/type/input_attachment.h"
 #include "src/tint/lang/core/type/matrix.h"
 #include "src/tint/lang/core/type/multisampled_texture.h"
+#include "src/tint/lang/core/type/resource_type.h"
 #include "src/tint/lang/core/type/sampled_texture.h"
 #include "src/tint/lang/core/type/storage_texture.h"
 #include "src/tint/lang/core/type/u32.h"
@@ -57,6 +58,7 @@
 #include "src/tint/lang/wgsl/ast/interpolate_attribute.h"
 #include "src/tint/lang/wgsl/ast/module.h"
 #include "src/tint/lang/wgsl/ast/override.h"
+#include "src/tint/lang/wgsl/ast/templated_identifier.h"
 #include "src/tint/lang/wgsl/sem/accessor_expression.h"
 #include "src/tint/lang/wgsl/sem/builtin_enum_expression.h"
 #include "src/tint/lang/wgsl/sem/call.h"
@@ -64,6 +66,7 @@
 #include "src/tint/lang/wgsl/sem/module.h"
 #include "src/tint/lang/wgsl/sem/statement.h"
 #include "src/tint/lang/wgsl/sem/struct.h"
+#include "src/tint/lang/wgsl/sem/type_expression.h"
 #include "src/tint/lang/wgsl/sem/variable.h"
 #include "src/tint/utils/containers/unique_vector.h"
 #include "src/tint/utils/math/math.h"
@@ -207,6 +210,23 @@ ResourceBinding ConvertHandleToResourceBinding(const tint::sem::GlobalVariable* 
         [&](const core::type::ExternalTexture*) {
             result.resource_type = ResourceBinding::ResourceType::kExternalTexture;
             result.dim = ResourceBinding::TextureDimension::k2d;
+        },
+        [&](const core::type::TexelBuffer* tex) {
+            result.resource_type = ResourceBinding::ResourceType::kReadWriteTexelBuffer;
+            switch (tex->Access()) {
+                case core::Access::kRead:
+                    result.resource_type = ResourceBinding::ResourceType::kReadOnlyTexelBuffer;
+                    break;
+                case core::Access::kReadWrite:
+                    result.resource_type = ResourceBinding::ResourceType::kReadWriteTexelBuffer;
+                    break;
+                case core::Access::kWrite:
+                case core::Access::kUndefined:
+                    TINT_UNREACHABLE() << "unhandled texel buffer access";
+            }
+            result.dim = TypeTextureDimensionToResourceBindingTextureDimension(tex->Dim());
+            result.sampled_kind = BaseTypeToSampledKind(tex->Type());
+            result.image_format = TypeTexelFormatToResourceBindingTexelFormat(tex->TexelFormat());
         },
 
         [&](const core::type::InputAttachment* attachment) {
@@ -405,6 +425,11 @@ std::vector<ResourceBinding> Inspector::GetResourceBindings(const std::string& e
                 result.push_back(ConvertBufferToResourceBinding(global));
                 break;
             case core::AddressSpace::kHandle:
+                // Skip resource bindings, they're reported in GetResourceBindingInfo
+                if (global->Type()->UnwrapPtrOrRef()->Is<core::type::ResourceBinding>()) {
+                    continue;
+                }
+
                 result.push_back(ConvertHandleToResourceBinding(global));
                 break;
         }
@@ -638,6 +663,12 @@ const Inspector::EntryPointTextureMetadata& Inspector::ComputeTextureMetadata(
                     int sampler_index = signature.IndexOf(core::ParameterUsage::kSampler);
 
                     if (texture_index == -1) {
+                        return;
+                    }
+
+                    // A texture of `sem::Call` means we're dealing with a `getBinding` or
+                    // `hasBinding` call. Skip it.
+                    if (call->Arguments()[size_t(texture_index)]->Is<sem::Call>()) {
                         return;
                     }
 
@@ -917,6 +948,84 @@ std::vector<Override> Inspector::Overrides() {
         results.push_back(MkOverride(global, global->Attributes().override_id.value()));
     }
     return results;
+}
+
+std::vector<ResourceBindingInfo> Inspector::GetResourceBindingInfo(const std::string& entry_point) {
+    auto* func = FindEntryPointByName(entry_point);
+    if (!func) {
+        return {};
+    }
+
+    auto& sem = program_.Sem();
+    Symbol entry_point_symbol = program_.Symbols().Get(entry_point);
+
+    std::unordered_map<BindingPoint, std::unordered_set<ResourceType>> bp_to_types;
+
+    // Iterate the call graph in reverse topological order such that function callers come
+    // before their callee.
+    auto declarations = sem.Module()->DependencyOrderedDeclarations();
+    for (auto rit = declarations.rbegin(); rit != declarations.rend(); rit++) {
+        auto* fn = sem.Get<sem::Function>(*rit);
+        if ((fn == nullptr) || !fn->HasCallGraphEntryPoint(entry_point_symbol)) {
+            continue;
+        }
+
+        for (auto* call : fn->DirectCalls()) {
+            tint::Switch(
+                call->Target(),  //
+                [&](const sem::BuiltinFn* builtin) {
+                    if (builtin->Fn() != wgsl::BuiltinFn::kHasBinding &&
+                        builtin->Fn() != wgsl::BuiltinFn::kGetBinding) {
+                        return;
+                    }
+
+                    auto* decl = call->Declaration();
+                    const auto* ident = decl->target->identifier->As<ast::TemplatedIdentifier>();
+
+                    TINT_ASSERT(ident);
+                    TINT_ASSERT(ident->arguments.Length() == 1);
+
+                    auto* val = sem.Get(decl->args[0])->As<sem::ValueExpression>();
+                    TINT_ASSERT(val);
+
+                    auto* global = val->RootIdentifier()->As<sem::GlobalVariable>();
+                    TINT_ASSERT(global);
+
+                    auto bp = global->Attributes().binding_point;
+                    TINT_ASSERT(bp.has_value());
+
+                    auto* type_expr = sem.Get(ident->arguments[0])->As<sem::TypeExpression>();
+                    TINT_ASSERT(type_expr);
+
+                    auto [iter, _] =
+                        bp_to_types.try_emplace(bp.value(), std::unordered_set<ResourceType>{});
+                    iter->second.insert(core::type::TypeToResourceType(type_expr->Type()));
+                });
+        }
+    }
+
+    std::vector<ResourceBindingInfo> result;
+
+    auto* func_sem = program_.Sem().Get(func);
+    for (auto& global : func_sem->TransitivelyReferencedGlobals()) {
+        auto* ba = global->Type()->UnwrapRef()->As<core::type::ResourceBinding>();
+        if (!ba) {
+            continue;
+        }
+
+        std::vector<ResourceType> type_info;
+        auto iter = bp_to_types.find(global->Attributes().binding_point.value());
+        if (iter != bp_to_types.end()) {
+            auto vec = std::vector<ResourceType>{iter->second.begin(), iter->second.end()};
+            type_info = std::move(vec);
+        }
+
+        result.push_back({.group = global->Attributes().binding_point->group,
+                          .binding = global->Attributes().binding_point->binding,
+                          .type_info = std::move(type_info)});
+    }
+
+    return result;
 }
 
 }  // namespace tint::inspector

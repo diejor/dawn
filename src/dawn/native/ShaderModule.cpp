@@ -126,6 +126,10 @@ wgpu::TextureFormat TintImageFormatToTextureFormat(
             return wgpu::TextureFormat::RG32Sint;
         case tint::inspector::ResourceBinding::TexelFormat::kRg32Float:
             return wgpu::TextureFormat::RG32Float;
+        case tint::inspector::ResourceBinding::TexelFormat::kRgba16Unorm:
+            return wgpu::TextureFormat::RGBA16Unorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kRgba16Snorm:
+            return wgpu::TextureFormat::RGBA16Snorm;
         case tint::inspector::ResourceBinding::TexelFormat::kRgba16Uint:
             return wgpu::TextureFormat::RGBA16Uint;
         case tint::inspector::ResourceBinding::TexelFormat::kRgba16Sint:
@@ -140,6 +144,46 @@ wgpu::TextureFormat TintImageFormatToTextureFormat(
             return wgpu::TextureFormat::RGBA32Float;
         case tint::inspector::ResourceBinding::TexelFormat::kR8Unorm:
             return wgpu::TextureFormat::R8Unorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kR8Snorm:
+            return wgpu::TextureFormat::R8Snorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kR8Uint:
+            return wgpu::TextureFormat::R8Uint;
+        case tint::inspector::ResourceBinding::TexelFormat::kR8Sint:
+            return wgpu::TextureFormat::R8Sint;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg8Unorm:
+            return wgpu::TextureFormat::RG8Unorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg8Snorm:
+            return wgpu::TextureFormat::RG8Snorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg8Uint:
+            return wgpu::TextureFormat::RG8Uint;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg8Sint:
+            return wgpu::TextureFormat::RG8Sint;
+        case tint::inspector::ResourceBinding::TexelFormat::kR16Unorm:
+            return wgpu::TextureFormat::R16Unorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kR16Snorm:
+            return wgpu::TextureFormat::R16Snorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kR16Uint:
+            return wgpu::TextureFormat::R16Uint;
+        case tint::inspector::ResourceBinding::TexelFormat::kR16Sint:
+            return wgpu::TextureFormat::R16Sint;
+        case tint::inspector::ResourceBinding::TexelFormat::kR16Float:
+            return wgpu::TextureFormat::R16Float;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg16Unorm:
+            return wgpu::TextureFormat::RG16Unorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg16Snorm:
+            return wgpu::TextureFormat::RG16Snorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg16Uint:
+            return wgpu::TextureFormat::RG16Uint;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg16Sint:
+            return wgpu::TextureFormat::RG16Sint;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg16Float:
+            return wgpu::TextureFormat::RG16Float;
+        case tint::inspector::ResourceBinding::TexelFormat::kRgb10A2Uint:
+            return wgpu::TextureFormat::RGB10A2Uint;
+        case tint::inspector::ResourceBinding::TexelFormat::kRgb10A2Unorm:
+            return wgpu::TextureFormat::RGB10A2Unorm;
+        case tint::inspector::ResourceBinding::TexelFormat::kRg11B10Ufloat:
+            return wgpu::TextureFormat::RG11B10Ufloat;
         case tint::inspector::ResourceBinding::TexelFormat::kNone:
             return wgpu::TextureFormat::Undefined;
 
@@ -376,6 +420,42 @@ ResultOrError<PixelLocalMemberType> FromTintPixelLocalMemberType(
     DAWN_UNREACHABLE();
 }
 
+ResultOrError<wgpu::DynamicBindingKind> FromArrayResourceType(tint::ResourceType type) {
+    switch (type) {
+        case tint::ResourceType::kTexture1d_f32:
+        case tint::ResourceType::kTexture1d_i32:
+        case tint::ResourceType::kTexture1d_u32:
+        case tint::ResourceType::kTexture2d_f32:
+        case tint::ResourceType::kTexture2d_i32:
+        case tint::ResourceType::kTexture2d_u32:
+        case tint::ResourceType::kTexture2dArray_f32:
+        case tint::ResourceType::kTexture2dArray_i32:
+        case tint::ResourceType::kTexture2dArray_u32:
+        case tint::ResourceType::kTexture3d_f32:
+        case tint::ResourceType::kTexture3d_i32:
+        case tint::ResourceType::kTexture3d_u32:
+        case tint::ResourceType::kTextureCube_f32:
+        case tint::ResourceType::kTextureCube_i32:
+        case tint::ResourceType::kTextureCube_u32:
+        case tint::ResourceType::kTextureCubeArray_f32:
+        case tint::ResourceType::kTextureCubeArray_i32:
+        case tint::ResourceType::kTextureCubeArray_u32:
+        case tint::ResourceType::kTextureMultisampled2d_f32:
+        case tint::ResourceType::kTextureMultisampled2d_i32:
+        case tint::ResourceType::kTextureMultisampled2d_u32:
+        case tint::ResourceType::kTextureDepth2d:
+        case tint::ResourceType::kTextureDepth2dArray:
+        case tint::ResourceType::kTextureDepthCube:
+        case tint::ResourceType::kTextureDepthCubeArray:
+        case tint::ResourceType::kTextureDepthMultisampled2d:
+            return wgpu::DynamicBindingKind::SampledTexture;
+        case tint::ResourceType::kEmpty:
+            return DAWN_VALIDATION_ERROR(
+                "Attempted to convert 'None' array resource type from Tint.");
+    }
+    DAWN_UNREACHABLE();
+}
+
 // Validation errors, if any, are stored within outputParseResult instead of get returned as
 // ErrorData.
 MaybeError ParseWGSL(std::unique_ptr<tint::Source::File> file,
@@ -413,24 +493,33 @@ MaybeError ParseSPIRV(const std::vector<uint32_t>& spirv,
                       const WGSLAllowedFeatures& allowedFeatures,
                       ShaderModuleParseResult* outputParseResult,
                       bool allowNonUniformDerivatives) {
-    tint::spirv::reader::Options options;
+    tint::Result<tint::core::ir::Module> irResult = tint::spirv::reader::ReadIR(spirv);
+    if (irResult != tint::Success) {
+        outputParseResult->SetValidationError(
+            DAWN_VALIDATION_ERROR("Error while parsing SPIR-V: %s\n", irResult.Failure().reason));
+        DAWN_ASSERT(!outputParseResult->HasTintProgram() && outputParseResult->HasError());
+        return {};
+    }
+
+    tint::wgsl::writer::Options options;
     options.allow_non_uniform_derivatives = allowNonUniformDerivatives;
     options.allowed_features = allowedFeatures.ToTint();
+    auto wgslResult = tint::wgsl::writer::ProgramFromIR(irResult.Get(), options);
 
-    tint::Program program = tint::spirv::reader::Read(spirv, options);
+    // If WGSL generation succeeded, store the generated Tint program with no validation error.
+    if (wgslResult == tint::Success) {
+        tint::Program program = wgslResult.Move();
 
-    // Store the compilation messages into outputParseResult.
-    DAWN_TRY(outputParseResult->compilationMessages.AddMessages(program.Diagnostics()));
+        // Store the compilation messages into outputParseResult.
+        DAWN_TRY(outputParseResult->compilationMessages.AddMessages(program.Diagnostics()));
 
-    // If SpirV parsing succeed, store the generated Tint program with no validation error.
-    if (program.IsValid()) {
         outputParseResult->tintProgram = UnsafeUnserializedValue<std::optional<Ref<TintProgram>>>(
             AcquireRef(new TintProgram(std::move(program), nullptr)));
         DAWN_ASSERT(outputParseResult->HasTintProgram() && !outputParseResult->HasError());
     } else {
         // Otherwise, store the validation error messages to outputParseResult.
-        outputParseResult->SetValidationError(
-            DAWN_VALIDATION_ERROR("Error while parsing SPIR-V: %s\n", program.Diagnostics().Str()));
+        outputParseResult->SetValidationError(DAWN_VALIDATION_ERROR(
+            "Error while generating WGSL: %s\n", wgslResult.Failure().reason));
         DAWN_ASSERT(!outputParseResult->HasTintProgram() && outputParseResult->HasError());
     }
 
@@ -443,11 +532,11 @@ std::vector<uint64_t> GetBindGroupMinBufferSizes(const BindingGroupInfoMap& shad
     std::vector<uint64_t> requiredBufferSizes(layout->GetUnverifiedBufferCount());
     uint32_t packedIdx = 0;
 
-    for (BindingIndex bindingIndex{0}; bindingIndex < layout->GetBufferCount(); ++bindingIndex) {
+    for (BindingIndex bindingIndex : layout->GetBufferIndices()) {
         const BindingInfo& bindingInfo = layout->GetBindingInfo(bindingIndex);
-        const auto* bufferBindingLayout =
-            std::get_if<BufferBindingInfo>(&bindingInfo.bindingLayout);
-        if (bufferBindingLayout == nullptr || bufferBindingLayout->minBindingSize > 0) {
+        const auto& bufferBindingLayout = std::get<BufferBindingInfo>(bindingInfo.bindingLayout);
+
+        if (bufferBindingLayout.minBindingSize > 0) {
             // Skip bindings that have minimum buffer size set in the layout
             continue;
         }
@@ -663,6 +752,30 @@ MaybeError ValidateCompatibilityOfSingleBindingWithLayout(const DeviceBase* devi
         });
 }
 
+MaybeError ValidateCompatibilityOfDynamicBindingArrayWithLayout(
+    DeviceBase* device,
+    const BindGroupLayoutInternalBase* layout,
+    const GroupDynamicBindingArrayInfo& shaderDynamicArray) {
+    DAWN_INVALID_IF(!layout->HasDynamicArray(), "%s doesn't contain a dynamic binding array.",
+                    layout);
+
+    DAWN_INVALID_IF(layout->GetAPIDynamicArrayStart() != shaderDynamicArray.start,
+                    "@binding for the dynamic array in the shader (%u) doesn't match the start "
+                    "(%u) defined in %s.",
+                    shaderDynamicArray.start, layout->GetAPIDynamicArrayStart(), layout);
+
+    // If the dynamic binding array is never accessed with any type in the shader, it is valid to
+    // use with any DynamicArrayKind.
+    if (shaderDynamicArray.kind != wgpu::DynamicBindingKind::Undefined) {
+        DAWN_INVALID_IF(shaderDynamicArray.kind != layout->GetDynamicArrayKind(),
+                        "Shader dynamic binding array is used with types (of kind %s) incompatible "
+                        "with %s's kind of dynamic binding array (%s).",
+                        shaderDynamicArray.kind, layout, layout->GetDynamicArrayKind());
+    }
+
+    return {};
+}
+
 MaybeError ValidateCompatibilityWithBindGroupLayout(DeviceBase* device,
                                                     BindGroupIndex group,
                                                     const EntryPointMetadata& entryPoint,
@@ -675,6 +788,15 @@ MaybeError ValidateCompatibilityWithBindGroupLayout(DeviceBase* device,
                          "validating that the entry-point's declaration for @group(%u) "
                          "@binding(%u) matches %s",
                          group, bindingId, layout);
+    }
+
+    // Check that the dynamic binding array, if any in the shader, matches the BindGroupLayout.
+    if (entryPoint.dynamicBindingArrays.contains(group)) {
+        DAWN_TRY_CONTEXT(
+            ValidateCompatibilityOfDynamicBindingArrayWithLayout(
+                device, layout, entryPoint.dynamicBindingArrays.at(group)),
+            "validating that the entry-point's dynamic binding array for @group(%u) matches %s",
+            group, layout);
     }
 
     return {};
@@ -1122,6 +1244,51 @@ ResultOrError<std::unique_ptr<EntryPointMetadata>> ReflectEntryPointUsingTint(
                         resource.binding, resource.bind_group);
     }
 
+    // Dynamic binding array reflection
+    for (const tint::inspector::ResourceBindingInfo& array :
+         inspector->GetResourceBindingInfo(entryPoint.name)) {
+        BindGroupIndex group(array.group);
+        if (DelayedInvalidIf(group >= kMaxBindGroupsTyped,
+                             "The entry-point uses a binding with a group decoration (%u) "
+                             "that exceeds maxBindGroups (%u) - 1.",
+                             group, kMaxBindGroups)) {
+            continue;
+        }
+
+        BindingNumber binding(array.binding);
+        if (DelayedInvalidIf(
+                binding >= kMaxBindingsPerBindGroupTyped,
+                "Binding number (%u) exceeds the maxBindingsPerBindGroup limit (%u) - 1.",
+                uint32_t(binding), kMaxBindingsPerBindGroup)) {
+            continue;
+        }
+
+        // Check that all the uses of the dynamic binding array have compatible DynamicArrayKind.
+        wgpu::DynamicBindingKind kind = wgpu::DynamicBindingKind::Undefined;
+        for (const auto& type : array.type_info) {
+            wgpu::DynamicBindingKind kindForType;
+            DAWN_TRY_ASSIGN(kindForType, FromArrayResourceType(type));
+
+            // This is the first kind that we compute, just store it.
+            if (kind == wgpu::DynamicBindingKind::Undefined) {
+                kind = kindForType;
+                continue;
+            }
+
+            DAWN_INVALID_IF(kindForType != kind,
+                            "Dynamic binding array for @group(%u) used with two incompatible kinds "
+                            "of types %s vs. %s",
+                            group, kind, kindForType);
+        }
+
+        DAWN_INVALID_IF(metadata->dynamicBindingArrays.contains(group),
+                        "Duplicate dynamic binding array for group: %u.", group);
+        metadata->dynamicBindingArrays[group] = {{
+            .start = binding,
+            .kind = kind,
+        }};
+    }
+
     // Sampler binding point placeholder for non-sampler texture usage. Make it
     // ToTint(EntryPointMetadata::nonSamplerBindingPoint), so that we have
     // FromTint(tintNonSamplerBindingPoint) == EntryPointMetadata::nonSamplerBindingPoint, and we
@@ -1239,25 +1406,6 @@ void ReflectShaderUsingTint(const ShaderModuleParseDeviceInfo& deviceInfo,
     }
 }
 }  // anonymous namespace
-
-ResultOrError<Extent3D> ValidateComputeStageWorkgroupSize(
-    const tint::Program& program,
-    const char* entryPointName,
-    bool usesSubgroupMatrix,
-    uint32_t maxSubgroupSize,
-    const LimitsForCompilationRequest& limits,
-    const LimitsForCompilationRequest& adaterSupportedlimits) {
-    tint::inspector::Inspector inspector(program);
-
-    // At this point the entry point must exist and must have workgroup size values.
-    tint::inspector::EntryPoint entryPoint = inspector.GetEntryPoint(entryPointName);
-    DAWN_ASSERT(entryPoint.workgroup_size.has_value());
-    const tint::inspector::WorkgroupSize& workgroup_size = entryPoint.workgroup_size.value();
-
-    return ValidateComputeStageWorkgroupSize(workgroup_size.x, workgroup_size.y, workgroup_size.z,
-                                             entryPoint.workgroup_storage_size, usesSubgroupMatrix,
-                                             maxSubgroupSize, limits, adaterSupportedlimits);
-}
 
 ResultOrError<Extent3D> ValidateComputeStageWorkgroupSize(
     uint32_t x,
@@ -1382,7 +1530,7 @@ void DumpShaderFromDescriptor(LogEmitter* logEmitter,
     }
 #else   // TINT_BUILD_SPV_READER
     // SPIR-V is not enabled, so the descriptor should not contain it.
-    DAWN_ASSERT(shaderModuleDesc.Get<ShaderSourceSPIRV>() == nullptr);
+    DAWN_ASSERT(!shaderModuleDesc.Has<ShaderSourceSPIRV>());
 #endif  // TINT_BUILD_SPV_READER
 
     // Dump WGSL.
@@ -1401,8 +1549,9 @@ ResultOrError<ShaderModuleParseResult> ParseShaderModule(ShaderModuleParseReques
 #if TINT_BUILD_SPV_READER
     // Handling SPIR-V if enabled.
     if (std::holds_alternative<ShaderModuleParseSpirvDescription>(req.shaderDescription)) {
-        // SpirV toggle should have been validated before checking cache.
+        // SPIRV toggle and instance feature should have been validated before checking cache.
         DAWN_ASSERT(!deviceInfo.toggles.Has(Toggle::DisallowSpirv));
+        // (No assert for wgpu::InstanceFeatureName::ShaderSourceSPIRV since there's no instance.)
 
         ShaderModuleParseSpirvDescription& spirvDesc =
             std::get<ShaderModuleParseSpirvDescription>(req.shaderDescription);
@@ -1476,7 +1625,11 @@ MaybeError ValidateCompatibilityWithPipelineLayout(DeviceBase* device,
     for (BindGroupIndex group : ~layout->GetBindGroupLayoutsMask()) {
         DAWN_INVALID_IF(entryPoint.bindings[group].size() > 0,
                         "The entry-point uses bindings in group %u but %s doesn't have a "
-                        "BindGroupLayout for this index",
+                        "BindGroupLayout for this index.",
+                        group, layout);
+        DAWN_INVALID_IF(entryPoint.dynamicBindingArrays.contains(group),
+                        "The entry-point uses a dynamic binding array in group %u but %s doesn't "
+                        "have a BindGroupLayout for this index.",
                         group, layout);
     }
 

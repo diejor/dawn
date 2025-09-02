@@ -34,6 +34,8 @@
 //                       Do not modify this file directly
 ////////////////////////////////////////////////////////////////////////////////
 
+// clang-format off
+
 #include "src/tint/lang/msl/builtin_fn.h"
 
 namespace tint::msl {
@@ -120,6 +122,10 @@ const char* str(BuiltinFn i) {
             return "simdgroup_multiply";
         case BuiltinFn::kSimdgroupMultiplyAccumulate:
             return "simdgroup_multiply_accumulate";
+        case BuiltinFn::kOsLog:
+            return "os_log";
+        case BuiltinFn::kPointerOffset:
+            return "pointer_offset";
     }
     return "<unknown>";
 }
@@ -140,8 +146,7 @@ tint::core::ir::Instruction::Accesses GetSideEffects(BuiltinFn fn) {
         case BuiltinFn::kThreadgroupBarrier:
         case BuiltinFn::kSimdBallot:
         case BuiltinFn::kQuadShuffleXor:
-            return core::ir::Instruction::Accesses{core::ir::Instruction::Access::kLoad,
-                                                   core::ir::Instruction::Access::kStore};
+            return core::ir::Instruction::Accesses{core::ir::Instruction::Access::kLoad, core::ir::Instruction::Access::kStore};
 
         case BuiltinFn::kAtomicLoadExplicit:
         case BuiltinFn::kGather:
@@ -173,9 +178,13 @@ tint::core::ir::Instruction::Accesses GetSideEffects(BuiltinFn fn) {
         case BuiltinFn::kConvert:
         case BuiltinFn::kSimdgroupMultiply:
         case BuiltinFn::kSimdgroupMultiplyAccumulate:
+        case BuiltinFn::kOsLog:
+        case BuiltinFn::kPointerOffset:
             break;
     }
     return core::ir::Instruction::Accesses{};
 }
 
 }  // namespace tint::msl
+
+// clang-format on

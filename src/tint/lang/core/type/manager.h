@@ -39,7 +39,9 @@
 #include "src/tint/lang/core/type/external_texture.h"
 #include "src/tint/lang/core/type/input_attachment.h"
 #include "src/tint/lang/core/type/multisampled_texture.h"
+#include "src/tint/lang/core/type/resource_binding.h"
 #include "src/tint/lang/core/type/sampler.h"
+#include "src/tint/lang/core/type/string.h"
 #include "src/tint/lang/core/type/struct.h"
 #include "src/tint/lang/core/type/subgroup_matrix.h"
 #include "src/tint/lang/core/type/texel_buffer.h"
@@ -535,29 +537,27 @@ class Manager final {
 
     /// @param elem_ty the array element type
     /// @param count the array element count
-    /// @param stride the optional array element stride
     /// @returns the array type
-    const core::type::Array* array(const core::type::Type* elem_ty,
-                                   uint32_t count,
-                                   uint32_t stride = 0);
+    const core::type::Array* array(const core::type::Type* elem_ty, uint32_t count);
 
     /// @param elem_ty the array element type
-    /// @param stride the optional array element stride
     /// @returns the runtime array type
-    const core::type::Array* runtime_array(const core::type::Type* elem_ty, uint32_t stride = 0);
+    const core::type::Array* runtime_array(const core::type::Type* elem_ty);
 
     /// @returns an array type with the element type `T` and size `N`.
     /// @tparam T the element type
     /// @tparam N the array length. If zero, then constructs a runtime-sized array.
-    /// @param stride the optional array element stride
     template <typename T, size_t N = 0>
-    const core::type::Array* array(uint32_t stride = 0) {
+    const core::type::Array* array() {
         if constexpr (N == 0) {
-            return runtime_array(Get<T>(), stride);
+            return runtime_array(Get<T>());
         } else {
-            return array(Get<T>(), N, stride);
+            return array(Get<T>(), N);
         }
     }
+
+    /// @returns the resource binding type
+    const core::type::ResourceBinding* resource_binding();
 
     /// @param elem_ty the array element type
     /// @param count the array element count
@@ -630,6 +630,9 @@ class Manager final {
     const core::type::InputAttachment* input_attachment(const core::type::Type* inner) {
         return Get<core::type::InputAttachment>(inner);
     }
+
+    /// @returns a string type
+    const core::type::String* String() { return Get<core::type::String>(); }
 
     /// A structure member descriptor.
     struct StructMemberDesc {

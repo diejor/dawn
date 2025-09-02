@@ -33,8 +33,10 @@
 #include "src/tint/lang/core/ir/function.h"
 #include "src/tint/lang/core/ir/module.h"
 #include "src/tint/lang/core/ir/var.h"
+#include "src/tint/lang/core/type/binding_array.h"
 #include "src/tint/lang/core/type/input_attachment.h"
 #include "src/tint/lang/core/type/pointer.h"
+#include "src/tint/lang/core/type/texel_buffer.h"
 #include "src/tint/lang/hlsl/writer/common/option_helpers.h"
 #include "src/tint/lang/hlsl/writer/printer/printer.h"
 #include "src/tint/lang/hlsl/writer/raise/raise.h"
@@ -46,6 +48,20 @@ Result<SuccessType> CanGenerate(const core::ir::Module& ir, const Options& optio
     for (auto* ty : ir.Types()) {
         if (ty->Is<core::type::SubgroupMatrix>()) {
             return Failure("subgroup matrices are not supported by the HLSL backend");
+        }
+        if (ty->Is<core::type::ResourceBinding>()) {
+            return Failure("resource_binding not supported by the HLSL backend");
+        }
+        if (ty->Is<core::type::TexelBuffer>()) {
+            // TODO(crbug/382544164): Prototype texel buffer feature
+            return Failure("texel buffers are not supported by the HLSL backend");
+        }
+        if (options.compiler == Options::Compiler::kFXC) {
+            if (auto* ba = ty->As<core::type::BindingArray>()) {
+                if (ba->Count()->Is<core::type::RuntimeArrayCount>()) {
+                    return Failure("runtime binding array not supported by the HLSL FXC backend");
+                }
+            }
         }
     }
 
@@ -80,10 +96,21 @@ Result<SuccessType> CanGenerate(const core::ir::Module& ir, const Options& optio
                     if (member->Attributes().builtin == core::BuiltinValue::kSubgroupId) {
                         return Failure("subgroup_id is not yet supported by the HLSL backend");
                     }
+
+                    if (member->Attributes().builtin == core::BuiltinValue::kBarycentricCoord &&
+                        options.compiler == Options::Compiler::kFXC) {
+                        return Failure(
+                            "barycentric_coord is not supported by the FXC HLSL backend");
+                    }
                 }
             } else {
                 if (param->Builtin() == core::BuiltinValue::kSubgroupId) {
                     return Failure("subgroup_id is not yet supported by the HLSL backend");
+                }
+
+                if (param->Builtin() == core::BuiltinValue::kBarycentricCoord &&
+                    options.compiler == Options::Compiler::kFXC) {
+                    return Failure("barycentric_coord is not supported by the FXC HLSL backend");
                 }
             }
         }

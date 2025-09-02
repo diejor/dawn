@@ -46,8 +46,10 @@
 #include "src/tint/lang/core/type/texture.h"
 #include "src/tint/lang/spirv/ir/builtin_call.h"
 #include "src/tint/lang/spirv/ir/literal_operand.h"
+#include "src/tint/lang/spirv/type/resource_binding.h"
 #include "src/tint/lang/spirv/type/sampled_image.h"
 #include "src/tint/utils/ice/ice.h"
+#include "src/tint/utils/internal_limits.h"
 
 using namespace tint::core::number_suffixes;  // NOLINT
 using namespace tint::core::fluent_types;     // NOLINT
@@ -115,6 +117,13 @@ const spirv::type::Image* ImageFromTexture(core::type::Manager& ty,
             sample_ty = st->Type();
             access = st->Access();
         },
+        [&](const core::type::TexelBuffer* tb) {
+            sampled = type::Sampled::kReadWriteOpCompatible;
+            fmt = tb->TexelFormat();
+            sample_ty = tb->Type();
+            access = tb->Access();
+            dim = type::Dim::kBuffer;
+        },
         [&](const core::type::InputAttachment* ia) {
             dim = type::Dim::kSubpassData;
             sampled = type::Sampled::kReadWriteOpCompatible;
@@ -142,6 +151,12 @@ const core::type::Type* ReplacementType(core::type::Manager& ty, const core::typ
             if (auto* replacement = ReplacementType(ty, arr->ElemType())) {
                 return ty.binding_array(replacement,
                                         arr->Count()->As<core::type::ConstantArrayCount>()->value);
+            }
+            return nullptr;
+        },
+        [&](const spirv::type::ResourceBinding* rb) -> const core::type::Type* {
+            if (auto* replacement = ReplacementType(ty, rb->GetBindingType())) {
+                return ty.Get<spirv::type::ResourceBinding>(replacement);
             }
             return nullptr;
         },
@@ -205,6 +220,9 @@ struct State {
                     case core::BuiltinFn::kSelect:
                     case core::BuiltinFn::kSubgroupBroadcast:
                     case core::BuiltinFn::kSubgroupShuffle:
+                    case core::BuiltinFn::kSubgroupShuffleDown:
+                    case core::BuiltinFn::kSubgroupShuffleUp:
+                    case core::BuiltinFn::kSubgroupShuffleXor:
                     case core::BuiltinFn::kTextureDimensions:
                     case core::BuiltinFn::kTextureGather:
                     case core::BuiltinFn::kTextureGatherCompare:
@@ -273,7 +291,10 @@ struct State {
                     SubgroupBroadcast(builtin);
                     break;
                 case core::BuiltinFn::kSubgroupShuffle:
-                    SubgroupShuffle(builtin);
+                case core::BuiltinFn::kSubgroupShuffleDown:
+                case core::BuiltinFn::kSubgroupShuffleUp:
+                case core::BuiltinFn::kSubgroupShuffleXor:
+                    SubgroupShuffle(builtin, config.subgroup_shuffle_clamped);
                     break;
                 case core::BuiltinFn::kTextureDimensions:
                     TextureDimensions(builtin);
@@ -1084,17 +1105,30 @@ struct State {
         builtin->Destroy();
     }
 
-    /// Handle a SubgroupShuffle() builtin.
+    /// Handles SubgroupShuffle(), SubgroupShuffleDown(), SubgroupShuffleUp(), SubgroupShuffleXor()
+    /// builtins.
     /// @param builtin the builtin call instruction
-    void SubgroupShuffle(core::ir::CoreBuiltinCall* builtin) {
+    void SubgroupShuffle(core::ir::CoreBuiltinCall* builtin, bool clamp_subgroup_shuffle) {
         TINT_ASSERT(builtin->Args().Length() == 2);
-        auto* id = builtin->Args()[1];
-
-        // Id must be an unsigned integer scalar, so bitcast if necessary.
-        if (id->Type()->IsSignedIntegerScalar()) {
-            auto* cast = b.Bitcast(ty.u32(), id);
+        // The second argument is either 'id' , 'delta', or 'mask'.
+        // All must be bound by [0, 128)
+        auto* arg2 = builtin->Args()[1];
+        // arg2 must be an unsigned integer scalar, so bitcast if necessary.
+        if (arg2->Type()->IsSignedIntegerScalar()) {
+            auto* cast = b.Bitcast(ty.u32(), arg2);
             cast->InsertBefore(builtin);
             builtin->SetArg(1, cast->Result());
+        }
+
+        /// Polyfill a `subgroupShuffleX` builtin call with one that has clamped the arg2 param
+        if (clamp_subgroup_shuffle) {
+            auto* shuffle_id = builtin->Args()[1];
+            auto* mask_max_subgroup_size =
+                b.Constant(core::u32(tint::internal_limits::kMaxSubgroupSize - 1));
+            b.InsertBefore(builtin, [&] {
+                auto* clamp_via_masking_and = b.And<u32>(shuffle_id, mask_max_subgroup_size);
+                builtin->SetArg(1, clamp_via_masking_and->Result());
+            });
         }
     }
 
@@ -1137,27 +1171,34 @@ struct State {
             auto* ptr = p->Type()->As<core::type::Pointer>();
             auto* arr = ptr->StoreType()->As<core::type::Array>();
 
-            // Make a pointer to the first element of the array that we will load from.
-            auto* elem_ptr = ty.ptr(ptr->AddressSpace(), arr->ElemType(), ptr->Access());
-            auto* src = b.Access(elem_ptr, p, offset);
-
             auto* layout = b.Constant(u32(col_major->Value()->ValueAs<bool>()
                                               ? SpvCooperativeMatrixLayoutColumnMajorKHR
                                               : SpvCooperativeMatrixLayoutRowMajorKHR));
             auto* memory_operand = Literal(u32(SpvMemoryAccessNonPrivatePointerMask));
 
-            // In SPIR-V `stride` is related to the type of the input pointer, while in WGSL
-            // `stride` means the number of elements between each row or column. When the subgroup
-            // matrix element type is `i8` or `u8`, and the input array type is `i32` or `u32`, we
-            // need to convert the `stride` in WGSL into the `stride` in SPIR-V by dividing the
-            // `stride` in WGSL with 4.
+            // In SPIR-V `stride` and `offset` are related to the type of the input pointer, while
+            // in WGSL they both mean the number of elements. When the subgroup matrix element type
+            // is `i8` or `u8`, and the input array type is `i32` or `u32`, we need to convert the
+            // `stride` and `offset` in WGSL into the ones in SPIR-V by dividing them with 4.
             core::ir::Value* applied_stride = nullptr;
+            core::ir::Value* applied_offset = nullptr;
             if (result_ty->Type()->Size() == 1u && arr->ElemType()->Size() == 4u) {
-                auto* binary = b.Binary(core::BinaryOp::kDivide, stride->Type(), stride, u32(4));
-                applied_stride = binary->Result()->As<core::ir::Value>();
+                auto* applied_stride_binary =
+                    b.Binary(core::BinaryOp::kDivide, stride->Type(), stride, u32(4));
+                applied_stride = applied_stride_binary->Result();
+
+                auto* applied_offset_binary =
+                    b.Binary(core::BinaryOp::kDivide, offset->Type(), offset, u32(4));
+                applied_offset = applied_offset_binary->Result();
             } else {
                 applied_stride = stride;
+                applied_offset = offset;
             }
+
+            // Make a pointer to the first element of the array that we will load from.
+            auto* elem_ptr = ty.ptr(ptr->AddressSpace(), arr->ElemType(), ptr->Access());
+            auto* src = b.Access(elem_ptr, p, applied_offset);
+
             auto* call = b.CallWithResult<spirv::ir::BuiltinCall>(
                 builtin->DetachResult(), spirv::BuiltinFn::kCooperativeMatrixLoad, src, layout,
                 applied_stride, memory_operand);
@@ -1173,15 +1214,36 @@ struct State {
             auto* p = builtin->Args()[0];
             auto* offset = builtin->Args()[1];
             auto* value = builtin->Args()[2];
+            auto* value_type = value->Type()->As<core::type::SubgroupMatrix>();
+
             auto* col_major = builtin->Args()[3]->As<core::ir::Constant>();
             auto* stride = builtin->Args()[4];
 
             auto* ptr = p->Type()->As<core::type::Pointer>();
             auto* arr = ptr->StoreType()->As<core::type::Array>();
 
+            // In SPIR-V `stride` and `offset` are related to the type of the input pointer, while
+            // in WGSL they both mean the number of elements. When the subgroup matrix element type
+            // is `i8` or `u8`, and the input array type is `i32` or `u32`, we need to convert the
+            // `stride` and `offset` in WGSL into the ones in SPIR-V by dividing them with 4.
+            core::ir::Value* applied_stride = nullptr;
+            core::ir::Value* applied_offset = nullptr;
+            if (value_type->Type()->Size() == 1u && arr->ElemType()->Size() == 4u) {
+                auto* applied_stride_binary =
+                    b.Binary(core::BinaryOp::kDivide, stride->Type(), stride, u32(4));
+                applied_stride = applied_stride_binary->Result();
+
+                auto* applied_offset_binary =
+                    b.Binary(core::BinaryOp::kDivide, offset->Type(), offset, u32(4));
+                applied_offset = applied_offset_binary->Result();
+            } else {
+                applied_stride = stride;
+                applied_offset = offset;
+            }
+
             // Make a pointer to the first element of the array that we will write to.
             auto* elem_ptr = ty.ptr(ptr->AddressSpace(), arr->ElemType(), ptr->Access());
-            auto* dst = b.Access(elem_ptr, p, offset);
+            auto* dst = b.Access(elem_ptr, p, applied_offset);
 
             auto* layout = b.Constant(u32(col_major->Value()->ValueAs<bool>()
                                               ? SpvCooperativeMatrixLayoutColumnMajorKHR
@@ -1189,7 +1251,7 @@ struct State {
             auto* memory_operand = Literal(u32(SpvMemoryAccessNonPrivatePointerMask));
 
             b.Call<spirv::ir::BuiltinCall>(ty.void_(), spirv::BuiltinFn::kCooperativeMatrixStore,
-                                           dst, value, layout, stride, memory_operand);
+                                           dst, value, layout, applied_stride, memory_operand);
         });
         builtin->Destroy();
     }
@@ -1253,7 +1315,11 @@ struct State {
 }  // namespace
 
 Result<SuccessType> BuiltinPolyfill(core::ir::Module& ir, PolyfillConfig config) {
-    auto result = ValidateAndDumpIfNeeded(ir, "spirv.BuiltinPolyfill");
+    auto result = ValidateAndDumpIfNeeded(ir, "spirv.BuiltinPolyfill",
+                                          core::ir::Capabilities{
+                                              core::ir::Capability::kAllowDuplicateBindings,
+                                          });
+
     if (result != Success) {
         return result.Failure();
     }

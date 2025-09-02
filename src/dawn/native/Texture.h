@@ -105,6 +105,10 @@ struct TextureViewQuery {
     wgpu::TextureUsage usage;
 
     // Update with fields from relevant chained structs as they are added.
+    wgpu::ComponentSwizzle swizzleRed = wgpu::ComponentSwizzle::R;
+    wgpu::ComponentSwizzle swizzleGreen = wgpu::ComponentSwizzle::G;
+    wgpu::ComponentSwizzle swizzleBlue = wgpu::ComponentSwizzle::B;
+    wgpu::ComponentSwizzle swizzleAlpha = wgpu::ComponentSwizzle::A;
 };
 
 static const size_t kDefaultTextureViewCacheCapacity = 4;
@@ -140,6 +144,8 @@ class TextureBase : public RefCountedWithExternalCount<SharedResource> {
     SubresourceRange GetAllSubresources() const;
     uint32_t GetSampleCount() const;
     uint32_t GetSubresourceCount() const;
+    bool HasPinnedUsage() const;
+    wgpu::TextureUsage GetPinnedUsage() const;
 
     // |GetUsage| returns the usage with which the texture was created using the base WebGPU
     // API. The dawn-internal-usages extension may add additional usages. |GetInternalUsage|
@@ -182,6 +188,9 @@ class TextureBase : public RefCountedWithExternalCount<SharedResource> {
     // GetMipLevelSingleSubresourceVirtualSize.
     Extent3D GetMipLevelSubresourceVirtualSize(uint32_t level, Aspect aspect) const;
 
+    MaybeError Pin(wgpu::TextureUsage usage);
+    void Unpin();
+
     ResultOrError<Ref<TextureViewBase>> CreateView(
         const TextureViewDescriptor* descriptor = nullptr);
     Ref<TextureViewBase> CreateErrorView(const TextureViewDescriptor* descriptor = nullptr);
@@ -202,6 +211,8 @@ class TextureBase : public RefCountedWithExternalCount<SharedResource> {
     TextureViewBase* APICreateView(const TextureViewDescriptor* descriptor = nullptr);
     TextureViewBase* APICreateErrorView(const TextureViewDescriptor* descriptor = nullptr);
     void APIDestroy();
+    void APIPin(wgpu::TextureUsage usages);
+    void APIUnpin();
     uint32_t APIGetWidth() const;
     uint32_t APIGetHeight() const;
     uint32_t APIGetDepthOrArrayLayers() const;
@@ -221,6 +232,9 @@ class TextureBase : public RefCountedWithExternalCount<SharedResource> {
 
     ExecutionSerial mLastSharedTextureMemoryUsageSerial{kBeginningOfGPUTime};
 
+    virtual MaybeError PinImpl(wgpu::TextureUsage usage);
+    virtual void UnpinImpl();
+
   private:
     struct TextureState {
         TextureState();
@@ -234,6 +248,11 @@ class TextureBase : public RefCountedWithExternalCount<SharedResource> {
     TextureBase(DeviceBase* device, const TextureDescriptor* descriptor, ObjectBase::ErrorTag tag);
 
     std::string GetSizeLabel() const;
+
+    ResultOrError<Ref<TextureViewBase>> GetOrCreateDefaultView();
+
+    MaybeError ValidatePin(wgpu::TextureUsage usages) const;
+    MaybeError ValidateUnpin() const;
 
     void WillAddFirstExternalRef() override;
     void WillDropLastExternalRef() override;
@@ -249,15 +268,17 @@ class TextureBase : public RefCountedWithExternalCount<SharedResource> {
     uint32_t mSampleCount;
     wgpu::TextureUsage mUsage = wgpu::TextureUsage::None;
     wgpu::TextureUsage mInternalUsage = wgpu::TextureUsage::None;
+    wgpu::TextureUsage mPinnedUsage = wgpu::TextureUsage::None;  // None if not pinned.
     TextureState mState;
     wgpu::TextureFormat mFormatEnumForReflection;
 
+    Ref<TextureViewBase> mDefaultView;
     // Textures track texture views created from them so that they can be destroyed when the texture
     // is destroyed.
     ApiObjectList mTextureViews;
 
     using TextureViewCache =
-        LRUCache<TextureViewQuery, Ref<TextureViewBase>, ErrorData, TextureViewCacheFuncs>;
+        LRUCache<TextureViewQuery, Ref<TextureViewBase>, TextureViewCacheFuncs>;
     std::unique_ptr<TextureViewCache> mTextureViewCache;
 
     // TODO(crbug.com/dawn/845): Use a more optimized data structure to save space
@@ -308,6 +329,13 @@ class TextureViewBase : public ApiObjectBase {
     wgpu::TextureUsage GetUsage() const;
     wgpu::TextureUsage GetInternalUsage() const;
 
+    wgpu::ComponentSwizzle GetSwizzleRed() const;
+    wgpu::ComponentSwizzle GetSwizzleGreen() const;
+    wgpu::ComponentSwizzle GetSwizzleBlue() const;
+    wgpu::ComponentSwizzle GetSwizzleAlpha() const;
+    bool UsesNonDefaultSwizzle() const;
+    wgpu::TextureComponentSwizzle ComposeSwizzle(wgpu::TextureComponentSwizzle swizzle) const;
+
     virtual bool IsYCbCr() const;
     // Valid to call only if `IsYCbCr()` is true.
     virtual YCbCrVkDescriptor GetYCbCrVkDescriptor() const;
@@ -327,6 +355,10 @@ class TextureViewBase : public ApiObjectBase {
     SubresourceRange mRange;
     const wgpu::TextureUsage mUsage = wgpu::TextureUsage::None;
     const wgpu::TextureUsage mInternalUsage = wgpu::TextureUsage::None;
+    wgpu::ComponentSwizzle mSwizzleRed = wgpu::ComponentSwizzle::R;
+    wgpu::ComponentSwizzle mSwizzleGreen = wgpu::ComponentSwizzle::G;
+    wgpu::ComponentSwizzle mSwizzleBlue = wgpu::ComponentSwizzle::B;
+    wgpu::ComponentSwizzle mSwizzleAlpha = wgpu::ComponentSwizzle::A;
 };
 
 }  // namespace dawn::native

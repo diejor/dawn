@@ -55,6 +55,7 @@
 #include "dawn/native/webgpu/CommandBufferWGPU.h"
 #include "dawn/native/webgpu/PhysicalDeviceWGPU.h"
 #include "dawn/native/webgpu/QueueWGPU.h"
+#include "dawn/native/webgpu/TextureWGPU.h"
 
 #include "tint/tint.h"
 
@@ -78,6 +79,7 @@ Device::Device(AdapterBase* adapter,
                const TogglesState& deviceToggles,
                Ref<DeviceBase::DeviceLostEvent>&& lostEvent)
     : DeviceBase(adapter, descriptor, deviceToggles, std::move(lostEvent)),
+      ObjectWGPU(ToBackend(adapter->GetPhysicalDevice())->GetFunctions().deviceRelease),
       wgpu(ToBackend(adapter->GetPhysicalDevice())->GetFunctions()) {
     DAWN_ASSERT(adapter->GetPhysicalDevice()->GetBackendType() == wgpu::BackendType::WebGPU);
 
@@ -107,15 +109,11 @@ Device::Device(AdapterBase* adapter,
 
     // TODO(crbug.com/413053623): use adapterRequestDevice instead as dawn_wire doesn't support
     // adapterCreateDevice.
-    mInnerDevice = wgpu.adapterCreateDevice(innerAdapter, &apiDesc);
+    mInnerHandle = wgpu.adapterCreateDevice(innerAdapter, &apiDesc);
 }
 
 Device::~Device() {
     Destroy();
-}
-
-WGPUDevice Device::GetInnerHandle() const {
-    return mInnerDevice;
 }
 
 WGPUInstance Device::GetInnerInstance() const {
@@ -129,11 +127,11 @@ MaybeError Device::Initialize(const UnpackedPtr<DeviceDescriptor>& descriptor) {
 }
 
 ResultOrError<Ref<BindGroupBase>> Device::CreateBindGroupImpl(
-    const BindGroupDescriptor* descriptor) {
+    const UnpackedPtr<BindGroupDescriptor>& descriptor) {
     return Ref<BindGroupBase>{nullptr};
 }
 ResultOrError<Ref<BindGroupLayoutInternalBase>> Device::CreateBindGroupLayoutImpl(
-    const BindGroupLayoutDescriptor* descriptor) {
+    const UnpackedPtr<BindGroupLayoutDescriptor>& descriptor) {
     // TODO(crbug.com/413053623): Replace with webgpu::BindGroupLayout object.
     // This placeholder implementation is needed because device is creating empty BindGroupLayout
     // and getting content hash.
@@ -184,7 +182,7 @@ ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(Surface* surface,
 }
 ResultOrError<Ref<TextureBase>> Device::CreateTextureImpl(
     const UnpackedPtr<TextureDescriptor>& descriptor) {
-    return Ref<TextureBase>{nullptr};
+    return Texture::Create(this, descriptor);
 }
 ResultOrError<Ref<TextureViewBase>> Device::CreateTextureViewImpl(
     TextureBase* texture,
@@ -202,11 +200,8 @@ void Device::DestroyImpl() {
     //   is implicitly destroyed. This case is thread-safe because there are no
     //   other threads using the device since there are no other live refs.
 
-    if (mInnerDevice) {
-        // webgpu.h guarantees that losing this reference will cause all internal resources to be
-        // freed and wait on the GPU if needed to do so.
-        wgpu.deviceRelease(mInnerDevice);
-        mInnerDevice = nullptr;
+    if (mInnerHandle) {
+        wgpu.deviceDestroy(mInnerHandle);
     }
 }
 
@@ -226,7 +221,7 @@ MaybeError Device::CopyFromStagingToTextureImpl(const BufferBase* source,
 }
 
 MaybeError Device::TickImpl() {
-    wgpu.deviceTick(mInnerDevice);
+    wgpu.deviceTick(mInnerHandle);
     return {};
 }
 

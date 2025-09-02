@@ -56,15 +56,16 @@ ResultOrError<UnpackedPtr<BufferDescriptor>> ValidateBufferDescriptor(
 
 static constexpr wgpu::BufferUsage kReadOnlyBufferUsages =
     wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::Index |
-    wgpu::BufferUsage::Vertex | wgpu::BufferUsage::Uniform | kReadOnlyStorageBuffer |
-    kIndirectBufferForFrontendValidation | kIndirectBufferForBackendResourceTracking;
+    wgpu::BufferUsage::Vertex | wgpu::BufferUsage::Uniform | kReadOnlyTexelBuffer |
+    kReadOnlyStorageBuffer | kIndirectBufferForFrontendValidation |
+    kIndirectBufferForBackendResourceTracking;
 
 static constexpr wgpu::BufferUsage kMappableBufferUsages =
     wgpu::BufferUsage::MapRead | wgpu::BufferUsage::MapWrite;
 
 static constexpr wgpu::BufferUsage kShaderBufferUsages =
-    wgpu::BufferUsage::Uniform | wgpu::BufferUsage::Storage | kInternalStorageBuffer |
-    kReadOnlyStorageBuffer;
+    wgpu::BufferUsage::Uniform | wgpu::BufferUsage::Storage | wgpu::BufferUsage::TexelBuffer |
+    kInternalStorageBuffer | kReadOnlyStorageBuffer | kReadOnlyTexelBuffer;
 
 static constexpr wgpu::BufferUsage kReadOnlyShaderBufferUsages =
     kShaderBufferUsages & kReadOnlyBufferUsages;
@@ -74,6 +75,10 @@ static constexpr wgpu::BufferUsage kReadOnlyShaderBufferUsages =
 wgpu::BufferUsage ComputeInternalBufferUsages(const DeviceBase* device,
                                               wgpu::BufferUsage usage,
                                               size_t bufferSize);
+
+ResultOrError<UnpackedPtr<TexelBufferViewDescriptor>> ValidateTexelBufferViewDescriptor(
+    const BufferBase* buffer,
+    const TexelBufferViewDescriptor* descriptor);
 
 class BufferBase : public SharedResource {
   public:
@@ -86,6 +91,8 @@ class BufferBase : public SharedResource {
         SharedMemoryNoAccess,
         Destroyed,
     };
+    static bool IsMappedState(BufferState state);
+
     static Ref<BufferBase> MakeError(DeviceBase* device, const BufferDescriptor* descriptor);
 
     ObjectType GetType() const override;
@@ -142,6 +149,12 @@ class BufferBase : public SharedResource {
     wgpu::BufferMapState APIGetMapState() const;
     uint64_t APIGetSize() const;
 
+    ResultOrError<Ref<TexelBufferViewBase>> CreateTexelView(
+        const TexelBufferViewDescriptor* descriptor);
+    TexelBufferViewBase* APICreateTexelView(const TexelBufferViewDescriptor* descriptor);
+
+    ApiObjectList* GetTexelBufferViewTrackingList();
+
   protected:
     BufferBase(DeviceBase* device, const UnpackedPtr<BufferDescriptor>& descriptor);
     BufferBase(DeviceBase* device, const BufferDescriptor* descriptor, ObjectBase::ErrorTag tag);
@@ -154,6 +167,11 @@ class BufferBase : public SharedResource {
     // creation. Otherwise, returns false indicating that backend specific mapping was used instead.
     ResultOrError<bool> MapAtCreationInternal();
 
+    BufferState GetState() const;
+    wgpu::MapMode MapMode() const;
+    size_t MapOffset() const;
+    size_t MapSize() const;
+
     uint64_t mAllocatedSize = 0;
 
     ExecutionSerial mLastUsageSerial = ExecutionSerial(0);
@@ -163,6 +181,7 @@ class BufferBase : public SharedResource {
 
     virtual MaybeError MapAtCreationImpl() = 0;
     virtual MaybeError MapAsyncImpl(wgpu::MapMode mode, size_t offset, size_t size) = 0;
+    virtual void FinalizeMapImpl() = 0;
     virtual void* GetMappedPointerImpl() = 0;
     virtual void UnmapImpl() = 0;
 
@@ -175,50 +194,49 @@ class BufferBase : public SharedResource {
                                 WGPUMapAsyncStatus* status) const;
     MaybeError ValidateUnmap() const;
     bool CanGetMappedRange(bool writable, size_t offset, size_t size) const;
-
-    // Unmaps the buffer and returns a MapAsyncEvent that should be set to ready if the buffer had a
-    // pending map event.
-    ResultOrError<Ref<MapAsyncEvent>> UnmapInternal(WGPUMapAsyncStatus status,
-                                                    std::string_view message);
+    MaybeError UnmapInternal(WGPUMapAsyncStatus status, std::string_view message);
 
     // Updates internal state to reflect that the buffer is now mapped.
-    void SetMapped(BufferState newState);
+    void FinalizeMap(BufferState newState);
 
     const uint64_t mSize = 0;
     const wgpu::BufferUsage mUsage = wgpu::BufferUsage::None;
     const wgpu::BufferUsage mInternalUsage = wgpu::BufferUsage::None;
     bool mIsDataInitialized = false;
 
-    // Mutable state of the buffer w.r.t mapping. These are kept together in an anonymous struct
-    // since they are all loosely guarded by |mBufferState| by update ordering.
-    struct {
-        // Currently, our API relies on the fact that there is a device level lock that synchronizes
-        // everything. For API*MappedRange calls, however, it is more efficient to not acquire the
-        // device-wide lock since we cannot actually protect against racing w.r.t Unmap, i.e. a user
-        // can call an API*MappedRange function, save the pointer, call Unmap, and now the user is
-        // holding an invalid pointer. While a buffer state change is always guarded by the
-        // device-lock, we can implement the necessary validations for the API*MappedRange calls
-        // without acquiring the lock by ensuring that:
-        //   1) For MapAsync, we only set |mBufferState| = Mapped AFTER we update the other members.
-        //   2) For *MappedRange functions, we always check |mBufferState| = Mapped before checking
-        //      other members for validation.
-        // With those assumptions in place, we can guarantee that if *MappedRange is successful,
-        // that MapAsync must have succeeded. We cannot guarantee, however, that Unmap did not race
-        // with *MappedRange, but that is the responsibility of the caller.
-        std::atomic<BufferState> mState = BufferState::Unmapped;
+    // The following members are mutable state of the buffer w.r.t mapping. They are all loosely
+    // guarded by |mBufferState| by update ordering.
 
-        // A recursive buffer used to implement mappedAtCreation for buffers with non-mappable
-        // usage. It is transiently allocated and released when the mappedAtCreation-buffer is
-        // unmapped. Because this buffer itself is directly mappable, it will not create another
-        // staging buffer recursively.
-        Ref<BufferBase> mStagingBuffer = nullptr;
+    // Currently, our API relies on the fact that there is a device level lock that synchronizes
+    // everything. For API*MappedRange calls, however, it is more efficient to not acquire the
+    // device-wide lock since we cannot actually protect against racing w.r.t Unmap, i.e. a user
+    // can call an API*MappedRange function, save the pointer, call Unmap, and now the user is
+    // holding an invalid pointer. While a buffer state change is always guarded by the
+    // device-lock, we can implement the necessary validations for the API*MappedRange calls
+    // without acquiring the lock by ensuring that:
+    //   1) For MapAsync, we only set |mBufferState| = Mapped AFTER we update the other members.
+    //   2) For *MappedRange functions, we always check |mBufferState| = Mapped before checking
+    //      other members for validation.
+    // With those assumptions in place, we can guarantee that if *MappedRange is successful,
+    // that MapAsync must have succeeded. We cannot guarantee, however, that Unmap did not race
+    // with *MappedRange, but that is the responsibility of the caller.
+    std::atomic<BufferState> mState = BufferState::Unmapped;
 
-        // Mapping specific states.
-        wgpu::MapMode mMapMode = wgpu::MapMode::None;
-        size_t mMapOffset = 0;
-        size_t mMapSize = 0;
-        std::variant<void*, Ref<MapAsyncEvent>> mMapData;
-    };
+    // A recursive buffer used to implement mappedAtCreation for buffers with non-mappable
+    // usage. It is transiently allocated and released when the mappedAtCreation-buffer is
+    // unmapped. Because this buffer itself is directly mappable, it will not create another
+    // staging buffer recursively.
+    Ref<BufferBase> mStagingBuffer = nullptr;
+
+    // Track texel buffer views created from this buffer so they can be destroyed
+    // when the buffer is destroyed.
+    ApiObjectList mTexelBufferViews;
+
+    // Mapping specific states.
+    wgpu::MapMode mMapMode = wgpu::MapMode::None;
+    size_t mMapOffset = 0;
+    size_t mMapSize = 0;
+    std::variant<void*, Ref<MapAsyncEvent>> mMapData;
 };
 
 }  // namespace dawn::native

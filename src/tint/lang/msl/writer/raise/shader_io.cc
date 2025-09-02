@@ -82,7 +82,10 @@ struct StateImpl : core::ir::transform::ShaderIOBackendState {
 
         for (auto& input : inputs) {
             if (input.attributes.builtin) {
-                auto* param = b.FunctionParam(input.name.Name(), input.type);
+                auto* param = b.FunctionParam(input.type);
+                if (input.name) {
+                    ir.SetName(param, input.name);
+                }
                 param->SetInvariant(input.attributes.invariant);
                 param->SetBuiltin(input.attributes.builtin.value());
                 input_indices.Push(InputIndex{static_cast<uint32_t>(input_params.Length()), 0u});
@@ -225,9 +228,12 @@ struct StateImpl : core::ir::transform::ShaderIOBackendState {
 }  // namespace
 
 Result<SuccessType> ShaderIO(core::ir::Module& ir, const ShaderIOConfig& config) {
-    auto result = ValidateAndDumpIfNeeded(
-        ir, "msl.ShaderIO",
-        tint::core::ir::Capabilities{tint::core::ir::Capability::kAllowDuplicateBindings});
+    auto result = ValidateAndDumpIfNeeded(ir, "msl.ShaderIO",
+                                          tint::core::ir::Capabilities{
+                                              core::ir::Capability::kAllow8BitIntegers,
+                                              core::ir::Capability::kAllowDuplicateBindings,
+                                              core::ir::Capability::kAllowNonCoreTypes,
+                                          });
     if (result != Success) {
         return result;
     }

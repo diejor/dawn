@@ -79,6 +79,8 @@ enum extension {
   dual_source_blending
   // WGSL Extension "subgroups"
   subgroups
+  // WGSL Extension "primitive_index"
+  primitive_index
 
   // A Chromium-specific extension for disabling uniformity analysis.
   chromium_disable_uniformity_analysis
@@ -97,6 +99,10 @@ enum extension {
   chromium_experimental_framebuffer_fetch
   // A Chromium-specific extension for subgroup matrix support
   chromium_experimental_subgroup_matrix
+  // A Chromium-specific extension for barycentric_coord support
+  chromium_experimental_barycentric_coord
+  // A Chromium-specific extension for dynamic binding
+  chromium_experimental_dynamic_binding
 }
 
 // https://gpuweb.github.io/gpuweb/wgsl/#language-extensions-sec
@@ -107,6 +113,9 @@ enum language_feature {
   unrestricted_pointer_parameters
   sized_binding_array
   texel_buffers
+
+  // Non-standard language features for Chromium developers.
+  chromium_print
 
   // Language features used only for testing whose status will never change.
   chromium_testing_unimplemented
@@ -150,6 +159,7 @@ type atomic<T>
 @display("array<{T}>") type runtime_array<T>
 type array<T, N: num>
 type binding_array<T, N: num>
+type resource_binding
 type sampler
 type sampler_comparison
 type texture_1d<T>
@@ -226,25 +236,47 @@ match subgroup_matrix_kind_result : subgroup_matrix_kind.result
 // https://gpuweb.github.io/gpuweb/wgsl/#texel-formats
 match f32_texel_format
   : texel_format.r8unorm
+  | texel_format.r8snorm
+  | texel_format.rg8unorm
+  | texel_format.rg8snorm
   | texel_format.bgra8unorm
   | texel_format.rgba8unorm
   | texel_format.rgba8snorm
+  | texel_format.r16unorm
+  | texel_format.r16snorm
+  | texel_format.rg16unorm
+  | texel_format.rg16snorm
+  | texel_format.rgba16unorm
+  | texel_format.rgba16snorm
+  | texel_format.r16float
+  | texel_format.rg16float
   | texel_format.rgba16float
   | texel_format.r32float
   | texel_format.rg32float
   | texel_format.rgba32float
+  | texel_format.rgb10a2unorm
+  | texel_format.rg11b10ufloat
 match i32_texel_format
-  : texel_format.rgba8sint
+  : texel_format.r8sint
+  | texel_format.rg8sint
+  | texel_format.rgba8sint
+  | texel_format.r16sint
+  | texel_format.rg16sint
   | texel_format.rgba16sint
   | texel_format.r32sint
   | texel_format.rg32sint
   | texel_format.rgba32sint
 match u32_texel_format
-  : texel_format.rgba8uint
+  : texel_format.r8uint
+  | texel_format.rg8uint
+  | texel_format.r16uint
+  | texel_format.rg16uint
+  | texel_format.rgba8uint
   | texel_format.rgba16uint
   | texel_format.r32uint
   | texel_format.rg32uint
   | texel_format.rgba32uint
+  | texel_format.rgb10a2uint
 
 match read: access.read
 match write: access.write
@@ -478,10 +510,12 @@ match workgroup
 @must_use implicit(F: texel_format, R: read) fn textureDimensions(texture: texture_storage_2d<F, R>) -> vec2<u32>
 @must_use implicit(F: texel_format, R: read) fn textureDimensions(texture: texture_storage_2d_array<F, R>) -> vec2<u32>
 @must_use implicit(F: texel_format, R: read) fn textureDimensions(texture: texture_storage_3d<F, R>) -> vec3<u32>
+@must_use implicit(F: texel_format, R: read) fn textureDimensions(texture: texel_buffer<F, R>) -> u32
 @must_use @stage("fragment", "compute") implicit(F: texel_format, W: writable) fn textureDimensions(texture: texture_storage_1d<F, W>) -> u32
 @must_use @stage("fragment", "compute") implicit(F: texel_format, W: writable) fn textureDimensions(texture: texture_storage_2d<F, W>) -> vec2<u32>
 @must_use @stage("fragment", "compute") implicit(F: texel_format, W: writable) fn textureDimensions(texture: texture_storage_2d_array<F, W>) -> vec2<u32>
 @must_use @stage("fragment", "compute") implicit(F: texel_format, W: writable) fn textureDimensions(texture: texture_storage_3d<F, W>) -> vec3<u32>
+@must_use @stage("fragment", "compute") implicit(F: texel_format, W: writable) fn textureDimensions(texture: texel_buffer<F, W>) -> u32
 @must_use fn textureDimensions(texture: texture_external) -> vec2<u32>
 @must_use implicit(T: fiu32, C: iu32) fn textureGather(@const component: C, texture: texture_2d<T>, sampler: sampler, coords: vec2<f32>) -> vec4<T>
 @must_use implicit(T: fiu32, C: iu32) fn textureGather(@const component: C, texture: texture_2d<T>, sampler: sampler, coords: vec2<f32>, @const offset: vec2<i32>) -> vec4<T>
@@ -583,14 +617,17 @@ match workgroup
 @stage("fragment", "compute") implicit(C: iu32, F: f32_texel_format, W: writable) fn textureStore(texture: texture_storage_2d<F, W>, coords: vec2<C>, value: vec4<f32>)
 @stage("fragment", "compute") implicit(C: iu32, F: f32_texel_format, W: writable, A: iu32) fn textureStore(texture: texture_storage_2d_array<F, W>, coords: vec2<C>, array_index: A, value: vec4<f32>)
 @stage("fragment", "compute") implicit(C: iu32, F: f32_texel_format, W: writable) fn textureStore(texture: texture_storage_3d<F, W>, coords: vec3<C>, value: vec4<f32>)
+@stage("fragment", "compute") implicit(C: iu32, F: f32_texel_format, RW: read_write) fn textureStore(texture: texel_buffer<F, RW>, coords: C, value: vec4<f32>)
 @stage("fragment", "compute") implicit(C: iu32, F: i32_texel_format, W: writable) fn textureStore(texture: texture_storage_1d<F, W>, coords: C, value: vec4<i32>)
 @stage("fragment", "compute") implicit(C: iu32, F: i32_texel_format, W: writable) fn textureStore(texture: texture_storage_2d<F, W>, coords: vec2<C>, value: vec4<i32>)
 @stage("fragment", "compute") implicit(C: iu32, F: i32_texel_format, W: writable, A: iu32) fn textureStore(texture: texture_storage_2d_array<F, W>, coords: vec2<C>, array_index: A, value: vec4<i32>)
 @stage("fragment", "compute") implicit(C: iu32, F: i32_texel_format, W: writable) fn textureStore(texture: texture_storage_3d<F, W>, coords: vec3<C>, value: vec4<i32>)
+@stage("fragment", "compute") implicit(C: iu32, F: i32_texel_format, RW: read_write) fn textureStore(texture: texel_buffer<F, RW>, coords: C, value: vec4<i32>)
 @stage("fragment", "compute") implicit(C: iu32, F: u32_texel_format, W: writable) fn textureStore(texture: texture_storage_1d<F, W>, coords: C, value: vec4<u32>)
 @stage("fragment", "compute") implicit(C: iu32, F: u32_texel_format, W: writable) fn textureStore(texture: texture_storage_2d<F, W>, coords: vec2<C>, value: vec4<u32>)
 @stage("fragment", "compute") implicit(C: iu32, F: u32_texel_format, W: writable, A: iu32) fn textureStore(texture: texture_storage_2d_array<F, W>, coords: vec2<C>, array_index: A, value: vec4<u32>)
 @stage("fragment", "compute") implicit(C: iu32, F: u32_texel_format, W: writable) fn textureStore(texture: texture_storage_3d<F, W>, coords: vec3<C>, value: vec4<u32>)
+@stage("fragment", "compute") implicit(C: iu32, F: u32_texel_format, RW: read_write) fn textureStore(texture: texel_buffer<F, RW>, coords: C, value: vec4<u32>)
 @must_use implicit(T: fiu32, C: iu32, L: iu32) fn textureLoad(texture: texture_1d<T>, coords: C, level: L) -> vec4<T>
 @must_use implicit(T: fiu32, C: iu32, L: iu32) fn textureLoad(texture: texture_2d<T>, coords: vec2<C>, level: L) -> vec4<T>
 @must_use implicit(T: fiu32, C: iu32, A: iu32, L: iu32) fn textureLoad(texture: texture_2d_array<T>, coords: vec2<C>, array_index: A, level: L) -> vec4<T>
@@ -612,6 +649,9 @@ match workgroup
 @must_use implicit(C: iu32, F: f32_texel_format, R: read) fn textureLoad(texture: texture_storage_3d<F, R>, coords: vec3<C>) -> vec4<f32>
 @must_use implicit(C: iu32, F: i32_texel_format, R: read) fn textureLoad(texture: texture_storage_3d<F, R>, coords: vec3<C>) -> vec4<i32>
 @must_use implicit(C: iu32, F: u32_texel_format, R: read) fn textureLoad(texture: texture_storage_3d<F, R>, coords: vec3<C>) -> vec4<u32>
+@must_use implicit(C: iu32, F: f32_texel_format, R: read) fn textureLoad(texture: texel_buffer<F, R>, coords: C) -> vec4<f32>
+@must_use implicit(C: iu32, F: i32_texel_format, R: read) fn textureLoad(texture: texel_buffer<F, R>, coords: C) -> vec4<i32>
+@must_use implicit(C: iu32, F: u32_texel_format, R: read) fn textureLoad(texture: texel_buffer<F, R>, coords: C) -> vec4<u32>
 @must_use @stage("fragment", "compute") implicit(C: iu32, F: f32_texel_format, RW: read_write) fn textureLoad(texture: texture_storage_1d<F, RW>, coords: C) -> vec4<f32>
 @must_use @stage("fragment", "compute") implicit(C: iu32, F: i32_texel_format, RW: read_write) fn textureLoad(texture: texture_storage_1d<F, RW>, coords: C) -> vec4<i32>
 @must_use @stage("fragment", "compute") implicit(C: iu32, F: u32_texel_format, RW: read_write) fn textureLoad(texture: texture_storage_1d<F, RW>, coords: C) -> vec4<u32>
@@ -624,6 +664,9 @@ match workgroup
 @must_use @stage("fragment", "compute") implicit(C: iu32, F: f32_texel_format, RW: read_write) fn textureLoad(texture: texture_storage_3d<F, RW>, coords: vec3<C>) -> vec4<f32>
 @must_use @stage("fragment", "compute") implicit(C: iu32, F: i32_texel_format, RW: read_write) fn textureLoad(texture: texture_storage_3d<F, RW>, coords: vec3<C>) -> vec4<i32>
 @must_use @stage("fragment", "compute") implicit(C: iu32, F: u32_texel_format, RW: read_write) fn textureLoad(texture: texture_storage_3d<F, RW>, coords: vec3<C>) -> vec4<u32>
+@must_use @stage("fragment", "compute") implicit(C: iu32, F: f32_texel_format, RW: read_write) fn textureLoad(texture: texel_buffer<F, RW>, coords: C) -> vec4<f32>
+@must_use @stage("fragment", "compute") implicit(C: iu32, F: i32_texel_format, RW: read_write) fn textureLoad(texture: texel_buffer<F, RW>, coords: C) -> vec4<i32>
+@must_use @stage("fragment", "compute") implicit(C: iu32, F: u32_texel_format, RW: read_write) fn textureLoad(texture: texel_buffer<F, RW>, coords: C) -> vec4<u32>
 
 @stage("fragment") implicit(T: fiu32) fn inputAttachmentLoad(input_attachment: input_attachment<T>) -> vec4<T>
 
@@ -734,6 +777,10 @@ match workgroup
   subgroup_matrix<subgroup_matrix_kind_right, T, C, K>,
   subgroup_matrix<subgroup_matrix_kind_result, TR, C, R>)
   -> subgroup_matrix<subgroup_matrix_kind_result, TR, C, R>
+
+// chromium_experimental_print
+implicit(T: concrete_scalar) fn print(T)
+implicit(N: num, T: concrete_scalar) fn print(vec<N, T>)
 
 ////////////////////////////////////////////////////////////////////////////////
 // Value constructors                                                         //
@@ -1068,3 +1115,35 @@ implicit(T: fa_f32_f16) ctor mat4x4(T, T, T, T,
 // Tint internal builtins                                                     //
 ////////////////////////////////////////////////////////////////////////////////
 @const("Identity") implicit(T) fn __tint_materialize(T) -> T
+
+////////////////////////////////////////////////////////////////////////////////
+// chromium_experimental_dynamic_binding                                      //
+////////////////////////////////////////////////////////////////////////////////
+@must_use fn arrayLength(resource_binding) -> u32
+
+@must_use implicit(K: fiu32, I: iu32) fn hasBinding<T: texture_1d<K> >(resource_binding, index: I) -> bool
+@must_use implicit(K: fiu32, I: iu32) fn hasBinding<T: texture_2d<K> >(resource_binding, index: I) -> bool
+@must_use implicit(K: fiu32, I: iu32) fn hasBinding<T: texture_2d_array<K> >(resource_binding, index: I) -> bool
+@must_use implicit(K: fiu32, I: iu32) fn hasBinding<T: texture_3d<K> >(resource_binding, index: I) -> bool
+@must_use implicit(K: fiu32, I: iu32) fn hasBinding<T: texture_cube<K> >(resource_binding, index: I) -> bool
+@must_use implicit(K: fiu32, I: iu32) fn hasBinding<T: texture_cube_array<K> >(resource_binding, index: I) -> bool
+@must_use implicit(K: fiu32, I: iu32) fn hasBinding<T: texture_multisampled_2d<K> >(resource_binding, index: I) -> bool
+@must_use implicit(I: iu32) fn hasBinding<T: texture_depth_2d>(resource_binding, index: I) -> bool
+@must_use implicit(I: iu32) fn hasBinding<T: texture_depth_2d_array>(resource_binding, index: I) -> bool
+@must_use implicit(I: iu32) fn hasBinding<T: texture_depth_cube>(resource_binding, index: I) -> bool
+@must_use implicit(I: iu32) fn hasBinding<T: texture_depth_cube_array>(resource_binding, index: I) -> bool
+@must_use implicit(I: iu32) fn hasBinding<T: texture_depth_multisampled_2d>(resource_binding, index: I) -> bool
+
+@must_use implicit(K: fiu32, I: iu32) fn getBinding<T: texture_1d<K> >(resource_binding, index: I) -> T
+@must_use implicit(K: fiu32, I: iu32) fn getBinding<T: texture_2d<K> >(resource_binding, index: I) -> T
+@must_use implicit(K: fiu32, I: iu32) fn getBinding<T: texture_2d_array<K> >(resource_binding, index: I) -> T
+@must_use implicit(K: fiu32, I: iu32) fn getBinding<T: texture_3d<K> >(resource_binding, index: I) -> T
+@must_use implicit(K: fiu32, I: iu32) fn getBinding<T: texture_cube<K> >(resource_binding, index: I) -> T
+@must_use implicit(K: fiu32, I: iu32) fn getBinding<T: texture_cube_array<K> >(resource_binding, index: I) -> T
+@must_use implicit(K: fiu32, I: iu32) fn getBinding<T: texture_multisampled_2d<K> >(resource_binding, index: I) -> T
+@must_use implicit(I: iu32) fn getBinding<T: texture_depth_2d>(resource_binding, index: I) -> T
+@must_use implicit(I: iu32) fn getBinding<T: texture_depth_2d_array>(resource_binding, index: I) -> T
+@must_use implicit(I: iu32) fn getBinding<T: texture_depth_cube>(resource_binding, index: I) -> T
+@must_use implicit(I: iu32) fn getBinding<T: texture_depth_cube_array>(resource_binding, index: I) -> T
+@must_use implicit(I: iu32) fn getBinding<T: texture_depth_multisampled_2d>(resource_binding, index: I) -> T
+

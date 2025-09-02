@@ -52,6 +52,7 @@
 #include "dawn/native/PhysicalDevice.h"
 #include "dawn/native/Queue.h"
 #include "dawn/native/SystemEvent.h"
+#include "dawn/native/TexelBufferView.h"
 #include "dawn/native/ValidationUtils_autogen.h"
 #include "dawn/platform/DawnPlatform.h"
 #include "dawn/platform/tracing/TraceEvent.h"
@@ -91,6 +92,8 @@ class ErrorBuffer final : public BufferBase {
         return {};
     }
 
+    void FinalizeMapImpl() override {}
+
     MaybeError MapAsyncImpl(wgpu::MapMode mode, size_t offset, size_t size) override {
         DAWN_UNREACHABLE();
     }
@@ -107,6 +110,35 @@ static uint32_t sZeroSizedMappingData = 0xCAFED00D;
 
 }  // anonymous namespace
 
+ResultOrError<UnpackedPtr<TexelBufferViewDescriptor>> ValidateTexelBufferViewDescriptor(
+    const BufferBase* buffer,
+    const TexelBufferViewDescriptor* descriptor) {
+    UnpackedPtr<TexelBufferViewDescriptor> desc;
+    DAWN_TRY_ASSIGN(desc, ValidateAndUnpack(descriptor));
+
+    DAWN_INVALID_IF(!(buffer->GetUsage() & wgpu::BufferUsage::TexelBuffer),
+                    "Buffer usage (%s) missing TexelBuffer bit.", buffer->GetUsage());
+
+    uint64_t size = desc->size == wgpu::kWholeSize ? buffer->GetSize() - desc->offset : desc->size;
+
+    DAWN_INVALID_IF(desc->offset > buffer->GetSize() || size > buffer->GetSize() - desc->offset,
+                    "Texel buffer view range (offset %u, size %u) exceeds buffer size %u.",
+                    desc->offset, size, buffer->GetSize());
+
+    const Format* formatInfo = nullptr;
+    DAWN_TRY_ASSIGN(formatInfo, ValidateTexelBufferFormat(buffer->GetDevice(), desc->format));
+    uint32_t texelSize = formatInfo->GetAspectInfo(Aspect::Color).block.byteSize;
+
+    DAWN_INVALID_IF(desc->offset % texelSize != 0,
+                    "Texel buffer view offset (%u) must be %u-byte aligned.", desc->offset,
+                    texelSize);
+    DAWN_INVALID_IF(size % texelSize != 0,
+                    "Texel buffer view size (%u) is not a multiple of texel size %u.", size,
+                    texelSize);
+
+    return desc;
+}
+
 wgpu::BufferUsage ComputeInternalBufferUsages(const DeviceBase* device,
                                               wgpu::BufferUsage usage,
                                               size_t bufferSize) {
@@ -114,6 +146,11 @@ wgpu::BufferUsage ComputeInternalBufferUsages(const DeviceBase* device,
     // ValidateSyncScopeResourceUsage will make sure we don't use both at the same time.
     if (usage & wgpu::BufferUsage::Storage) {
         usage |= kReadOnlyStorageBuffer;
+    }
+
+    // Texel buffers support read-only access without requiring storage usage.
+    if (usage & wgpu::BufferUsage::TexelBuffer) {
+        usage |= kReadOnlyTexelBuffer;
     }
 
     // The query resolve buffer need to be used as a storage buffer in the internal compute
@@ -253,7 +290,7 @@ struct BufferBase::MapAsyncEvent final : public EventManager::TrackedEvent {
                 error = true;
             } else if (auto** buffer = std::get_if<BufferBase*>(&*bufferOrError)) {
                 // Set the buffer state to Mapped if this pending map succeeded.
-                (*buffer)->SetMapped(BufferState::Mapped);
+                (*buffer)->FinalizeMap(BufferState::Mapped);
             }
         });
         if (error) {
@@ -307,6 +344,11 @@ ResultOrError<UnpackedPtr<BufferDescriptor>> ValidateBufferDescriptor(
 
     DAWN_INVALID_IF(usage == wgpu::BufferUsage::None, "Buffer usages must not be 0.");
 
+    if (usage & wgpu::BufferUsage::TexelBuffer) {
+        DAWN_INVALID_IF(!device->AreTexelBuffersEnabled(), "%s is not enabled.",
+                        wgpu::WGSLLanguageFeatureName::TexelBuffers);
+    }
+
     if (!device->HasFeature(Feature::BufferMapExtendedUsages)) {
         const wgpu::BufferUsage kMapWriteAllowedUsages =
             wgpu::BufferUsage::MapWrite | wgpu::BufferUsage::CopySrc;
@@ -341,12 +383,18 @@ ResultOrError<UnpackedPtr<BufferDescriptor>> ValidateBufferDescriptor(
 
 // Buffer
 
+// static
+bool BufferBase::IsMappedState(BufferState state) {
+    return state == BufferBase::BufferState::Mapped ||
+           state == BufferBase::BufferState::MappedAtCreation;
+}
+
 BufferBase::BufferBase(DeviceBase* device, const UnpackedPtr<BufferDescriptor>& descriptor)
     : SharedResource(device, descriptor->label),
       mSize(descriptor->size),
       mUsage(descriptor->usage),
       mInternalUsage(ComputeInternalBufferUsages(device, descriptor->usage, descriptor->size)),
-      mState(descriptor.Get<BufferHostMappedPointer>() ? BufferState::HostMappedPersistent
+      mState(descriptor.Has<BufferHostMappedPointer>() ? BufferState::HostMappedPersistent
                                                        : BufferState::Unmapped) {
     GetObjectTrackingList()->Track(this);
 }
@@ -373,6 +421,7 @@ BufferBase::BufferBase(DeviceBase* device,
 BufferBase::~BufferBase() {
     BufferState state = mState.load(std::memory_order::acquire);
     DAWN_ASSERT(state == BufferState::Unmapped || state == BufferState::Destroyed ||
+                state == BufferState::SharedMemoryNoAccess ||
                 // Happens if the buffer was created mappedAtCreation *after* device destroy.
                 // TODO(crbug.com/42241190): This shouldn't be needed once the issue above is fixed,
                 // because then bufferState will just be Destroyed.
@@ -381,15 +430,13 @@ BufferBase::~BufferBase() {
 }
 
 void BufferBase::DestroyImpl() {
-    Ref<MapAsyncEvent> event;
-
     switch (mState.load(std::memory_order::acquire)) {
         case BufferState::Mapped:
         case BufferState::PendingMap: {
             [[maybe_unused]] bool hadError = GetDevice()->ConsumedError(
                 UnmapInternal(WGPUMapAsyncStatus_Aborted,
                               "Buffer was destroyed before mapping was resolved."),
-                &event, "calling %s.Destroy().", this);
+                "calling %s.Destroy().", this);
             break;
         }
         case BufferState::MappedAtCreation: {
@@ -399,7 +446,7 @@ void BufferBase::DestroyImpl() {
                 [[maybe_unused]] bool hadError = GetDevice()->ConsumedError(
                     UnmapInternal(WGPUMapAsyncStatus_Aborted,
                                   "Buffer was destroyed before mapping was resolved."),
-                    &event, "calling %s.Destroy().", this);
+                    "calling %s.Destroy().", this);
             }
             break;
         }
@@ -408,15 +455,7 @@ void BufferBase::DestroyImpl() {
     }
     mState.store(BufferState::Destroyed, std::memory_order::release);
 
-    // This is the error cases where re-entrant API calls, specifically Unmap will fail since
-    // this function is called in two places, via Buffer::APIDestroy and Device::Destroy, both which
-    // currently hold the device-wide lock which we don't yet have a way to circumvent and release
-    // before the callback is called (spontaneously). That said, this only happens if a user is
-    // calling Unmap in the MapAsync callback even though the callback was Aborted which is an
-    // invalid use case.
-    if (event) {
-        GetInstance()->GetEventManager()->SetFutureReady(event.Get());
-    }
+    mTexelBufferViews.Destroy();
 }
 
 // static
@@ -468,7 +507,7 @@ wgpu::BufferMapState BufferBase::APIGetMapState() const {
     }
 }
 
-void BufferBase::SetMapped(BufferState newState) {
+void BufferBase::FinalizeMap(BufferState newState) {
     // There are only 2 valid transitions:
     //   1) Nominal: PendingMap -> Mapped
     //   2) MappedAtCreation case because initial state is unmapped: Unmapped -> MappedAtCreation.
@@ -485,6 +524,8 @@ void BufferBase::SetMapped(BufferState newState) {
     }
 
     mState.store(newState, std::memory_order::release);
+
+    FinalizeMapImpl();
 }
 
 MaybeError BufferBase::MapAtCreation() {
@@ -547,11 +588,31 @@ ResultOrError<bool> BufferBase::MapAtCreationInternal() {
     // Only set the state to mapped at creation if we did not fail any point in this helper.
     // Otherwise, if we override the default unmapped state before succeeding to create a
     // staging buffer, we will have issues when we try to destroy the buffer.
+    mMapMode = wgpu::MapMode::Write;
     mMapOffset = 0;
     mMapSize = mSize;
     mStagingBuffer = std::move(stagingBuffer);
-    SetMapped(BufferState::MappedAtCreation);
+    FinalizeMap(BufferState::MappedAtCreation);
     return mStagingBuffer != nullptr;
+}
+
+BufferBase::BufferState BufferBase::GetState() const {
+    return mState.load(std::memory_order::acquire);
+}
+
+wgpu::MapMode BufferBase::MapMode() const {
+    DAWN_ASSERT(IsMappedState(GetState()));
+    return mMapMode;
+}
+
+size_t BufferBase::MapOffset() const {
+    DAWN_ASSERT(IsMappedState(GetState()));
+    return mMapOffset;
+}
+
+size_t BufferBase::MapSize() const {
+    DAWN_ASSERT(IsMappedState(GetState()));
+    return mMapSize;
 }
 
 MaybeError BufferBase::ValidateCanUseOnQueueNow() const {
@@ -584,7 +645,7 @@ Future BufferBase::APIMapAsync(wgpu::MapMode mode,
 
     Ref<MapAsyncEvent> event;
     {
-        auto deviceLock(GetDevice()->GetScopedLock());
+        auto deviceGuard = GetDevice()->GetGuard();
 
         // Handle the defaulting of size required by WebGPU, even if in webgpu_cpp.h it is not
         // possible to default the function argument (because there is the callback later in the
@@ -655,8 +716,7 @@ wgpu::Status BufferBase::APIReadMappedRange(size_t offset, void* data, size_t si
 }
 
 void* BufferBase::GetMappedPointer() {
-    BufferState state = mState.load(std::memory_order::acquire);
-    if (state != BufferState::MappedAtCreation && state != BufferState::Mapped) {
+    if (!IsMappedState(mState.load(std::memory_order::acquire))) {
         return nullptr;
     }
     void** ptr = std::get_if<void*>(&mMapData);
@@ -692,21 +752,13 @@ MaybeError BufferBase::CopyFromStagingBuffer() {
 }
 
 void BufferBase::APIUnmap() {
-    Ref<MapAsyncEvent> event;
-    {
-        auto deviceLock(GetDevice()->GetScopedLock());
-        if (GetDevice()->ConsumedError(ValidateUnmap(), "calling %s.Unmap().", this)) {
-            return;
-        }
-        [[maybe_unused]] bool hadError = GetDevice()->ConsumedError(
-            UnmapInternal(WGPUMapAsyncStatus_Aborted,
-                          "Buffer was unmapped before mapping was resolved."),
-            &event, "calling %s.Unmap().", this);
+    if (GetDevice()->ConsumedError(ValidateUnmap(), "calling %s.Unmap().", this)) {
+        return;
     }
-
-    if (event) {
-        GetInstance()->GetEventManager()->SetFutureReady(event.Get());
-    }
+    [[maybe_unused]] bool hadError = GetDevice()->ConsumedError(
+        UnmapInternal(WGPUMapAsyncStatus_Aborted,
+                      "Buffer was unmapped before mapping was resolved."),
+        "calling %s.Unmap().", this);
 }
 
 MaybeError BufferBase::Unmap() {
@@ -736,31 +788,33 @@ MaybeError BufferBase::Unmap() {
     return {};
 }
 
-ResultOrError<Ref<BufferBase::MapAsyncEvent>> BufferBase::UnmapInternal(WGPUMapAsyncStatus status,
-                                                                        std::string_view message) {
-    Ref<MapAsyncEvent> event;
-
+MaybeError BufferBase::UnmapInternal(WGPUMapAsyncStatus status, std::string_view message) {
     BufferState state = mState.load(std::memory_order::acquire);
 
     // If the buffer is already destroyed, we don't need to do anything.
     if (state == BufferState::Destroyed) {
-        return nullptr;
+        return {};
     }
 
-    // For pending maps, set the pending event statuses, and return it. The caller is responsible
-    // for setting the event to be ready once we no longer are holding the device-wide lock.
     if (state == BufferState::PendingMap) {
         // For pending maps, we update the pending event, and only set it to ready after releasing
         // the buffer state lock so that spontaneous callbacks with re-entrant calls work properly.
-        event = std::get<Ref<MapAsyncEvent>>(std::exchange(mMapData, static_cast<void*>(nullptr)));
+        Ref<MapAsyncEvent> event =
+            std::get<Ref<MapAsyncEvent>>(std::exchange(mMapData, static_cast<void*>(nullptr)));
+
         event->UnmapEarly(status, message);
         UnmapImpl();
         mState.store(BufferState::Unmapped, std::memory_order::release);
-        return std::move(event);
+
+        GetDevice()->DeferIfLocked(
+            [eventManager = GetInstance()->GetEventManager(), mapEvent = std::move(event)]() {
+                eventManager->SetFutureReady(mapEvent.Get());
+            });
+        return {};
     }
 
     DAWN_TRY(Unmap());
-    return nullptr;
+    return {};
 }
 
 MaybeError BufferBase::ValidateMapAsync(wgpu::MapMode mode,
@@ -943,6 +997,26 @@ void BufferBase::DumpMemoryStatistics(MemoryDump* dump, const char* prefix) cons
                     GetAllocatedSize());
     dump->AddString(name.c_str(), "label", GetLabel());
     dump->AddString(name.c_str(), "usage", absl::StrFormat("%s", GetInternalUsage()));
+}
+
+ResultOrError<Ref<TexelBufferViewBase>> BufferBase::CreateTexelView(
+    const TexelBufferViewDescriptor* descriptor) {
+    DAWN_ASSERT(descriptor != nullptr);
+    return GetDevice()->CreateTexelBufferView(this, descriptor);
+}
+
+TexelBufferViewBase* BufferBase::APICreateTexelView(const TexelBufferViewDescriptor* descriptor) {
+    DeviceBase* device = GetDevice();
+    Ref<TexelBufferViewBase> result;
+    if (device->ConsumedError(CreateTexelView(descriptor), &result,
+                              "calling %s.CreateTexelView(%s).", this, descriptor)) {
+        result = TexelBufferViewBase::MakeError(device, descriptor ? descriptor->label : nullptr);
+    }
+    return ReturnToAPI(std::move(result));
+}
+
+ApiObjectList* BufferBase::GetTexelBufferViewTrackingList() {
+    return &mTexelBufferViews;
 }
 
 }  // namespace dawn::native

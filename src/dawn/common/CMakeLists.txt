@@ -117,7 +117,6 @@ set(sources
     "GPUInfo.cpp"
     "Log.cpp"
     "Math.cpp"
-    "Mutex.cpp"
     "RefCounted.cpp"
     "Result.cpp"
     "Sha3.cpp"
@@ -152,7 +151,6 @@ elseif(APPLE)
     )
 endif()
 
-
 if (CMAKE_SYSTEM_NAME STREQUAL "Android")
     find_library(log_lib log)
     list(APPEND conditional_private_depends
@@ -180,6 +178,7 @@ dawn_add_library(
         webgpu_c
         webgpu_cpp
     PRIVATE_DEPENDS
+        absl::flat_hash_set
         absl::inlined_vector
         absl::no_destructor
         absl::overload

@@ -41,17 +41,19 @@
 #include "src/tint/utils/containers/filtered_iterator.h"
 #include "src/tint/utils/containers/vector.h"
 #include "src/tint/utils/diagnostic/source.h"
-#include "src/tint/utils/generation_id.h"
 #include "src/tint/utils/memory/block_allocator.h"
 #include "src/tint/utils/symbol/symbol_table.h"
 
 namespace tint::core::ir {
 
+// Wrappers around the base TINT_ICE() macros that use the ice_callback attached to the module.
+#define TINT_IR_ICE(module) TINT_ICE(module.ice_callback)
+#define TINT_IR_UNREACHABLE(module) TINT_UNREACHABLE(module.ice_callback)
+#define TINT_IR_UNIMPLEMENTED(module) TINT_UNIMPLEMENTED(module.ice_callback)
+#define TINT_IR_ASSERT(module, condition) TINT_ASSERT((condition), module.ice_callback)
+
 /// Main module class for the IR.
 class Module {
-    /// Program Id required to create other components
-    GenerationID prog_id_;
-
     /// Map of value to name
     Hashmap<const Value*, Symbol, 32> value_to_name_;
 
@@ -195,10 +197,13 @@ class Module {
     ConstPropagatingPtr<Block> root_block;
 
     /// The symbol table for the module
-    SymbolTable symbols{prog_id_};
+    SymbolTable symbols{};
 
     /// The map of core::constant::Value to their ir::Constant.
     Hashmap<const core::constant::Value*, ir::Constant*, 16> constants;
+
+    /// An optional callback to receive an ICE generated while processing this module.
+    InternalCompilerErrorCallback ice_callback;
 
   private:
     /// @returns the next instruction id for this module

@@ -579,7 +579,7 @@ TEST_F(SpirvReader_ShaderIOTest, Inputs_UsedByMultipleEntryPoints) {
         auto* group_value = b.Load(group_id);
         b.Add(ty.vec3<u32>(), group_value, group_value);
         b.Call(foo);
-        b.Return(ep1);
+        b.Return(ep2);
     });
 
     auto* src = R"(
@@ -2306,6 +2306,91 @@ $B1: {  # root
     EXPECT_EQ(expect, str());
 }
 
+TEST_F(SpirvReader_ShaderIOTest, PrimitiveIndex_i32) {
+    auto* idx = b.Var("prim_idx", ty.ptr(core::AddressSpace::kIn, ty.i32()));
+    idx->SetBuiltin(core::BuiltinValue::kPrimitiveIndex);
+    mod.root_block->Append(idx);
+
+    auto* ep = b.Function("foo", ty.i32(), core::ir::Function::PipelineStage::kFragment);
+    ep->SetReturnLocation(0);
+    b.Append(ep->Block(), [&] {
+        auto* idx_value = b.Load(idx);
+        auto* doubled = b.Multiply(ty.i32(), idx_value, 2_i);
+        b.Return(ep, doubled);
+    });
+
+    auto* src = R"(
+$B1: {  # root
+  %prim_idx:ptr<__in, i32, read> = var undef @builtin(primitive_index)
+}
+
+%foo = @fragment func():i32 [@location(0)] {
+  $B2: {
+    %3:i32 = load %prim_idx
+    %4:i32 = mul %3, 2i
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = @fragment func(%prim_idx:u32 [@primitive_index]):i32 [@location(0)] {
+  $B1: {
+    %3:i32 = convert %prim_idx
+    %4:i32 = mul %3, 2i
+    ret %4
+  }
+}
+)";
+
+    Run(ShaderIO);
+
+    EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvReader_ShaderIOTest, PrimitiveIndex_u32) {
+    auto* idx = b.Var("prim_idx", ty.ptr(core::AddressSpace::kIn, ty.u32()));
+    idx->SetBuiltin(core::BuiltinValue::kPrimitiveIndex);
+    mod.root_block->Append(idx);
+
+    auto* ep = b.Function("foo", ty.u32(), core::ir::Function::PipelineStage::kFragment);
+    ep->SetReturnLocation(0);
+    b.Append(ep->Block(), [&] {
+        auto* idx_value = b.Load(idx);
+        auto* doubled = b.Multiply(ty.u32(), idx_value, 2_u);
+        b.Return(ep, doubled);
+    });
+
+    auto* src = R"(
+$B1: {  # root
+  %prim_idx:ptr<__in, u32, read> = var undef @builtin(primitive_index)
+}
+
+%foo = @fragment func():u32 [@location(0)] {
+  $B2: {
+    %3:u32 = load %prim_idx
+    %4:u32 = mul %3, 2u
+    ret %4
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto* expect = R"(
+%foo = @fragment func(%prim_idx:u32 [@primitive_index]):u32 [@location(0)] {
+  $B1: {
+    %3:u32 = mul %prim_idx, 2u
+    ret %3
+  }
+}
+)";
+
+    Run(ShaderIO);
+
+    EXPECT_EQ(expect, str());
+}
+
 TEST_F(SpirvReader_ShaderIOTest, LocalInvocationIndex_i32) {
     auto* idx = b.Var("idx", ty.ptr(core::AddressSpace::kIn, ty.i32()));
     idx->SetBuiltin(core::BuiltinValue::kLocalInvocationIndex);
@@ -3244,6 +3329,58 @@ $B1: {  # root
     EXPECT_EQ(expect, str());
 }
 
+TEST_F(SpirvReader_ShaderIOTest, PointSize_Struct_StoreNotOne) {
+    auto* builtin_str =
+        ty.Struct(mod.symbols.New("Builtins"), Vector{
+                                                   core::type::Manager::StructMemberDesc{
+                                                       mod.symbols.New("position"),
+                                                       ty.vec4<f32>(),
+                                                       BuiltinAttrs(core::BuiltinValue::kPosition),
+                                                   },
+                                                   core::type::Manager::StructMemberDesc{
+                                                       mod.symbols.New("point_size"),
+                                                       ty.f32(),
+                                                       BuiltinAttrs(core::BuiltinValue::kPointSize),
+                                                   },
+                                               });
+    auto* builtins = b.Var("builtins", ty.ptr(core::AddressSpace::kOut, builtin_str));
+    mod.root_block->Append(builtins);
+
+    auto* ep = b.Function("foo", ty.void_(), core::ir::Function::PipelineStage::kVertex);
+    b.Append(ep->Block(), [&] {  //
+        auto* ptr = ty.ptr(core::AddressSpace::kOut, ty.vec4<f32>());
+        b.Store(b.Access(ptr, builtins, 0_u), b.Splat<vec4<f32>>(1_f));
+        b.Store(b.Access(ty.ptr(core::AddressSpace::kOut, ty.f32()), builtins, 1_u), 2_f);
+        b.Return(ep);
+    });
+
+    auto* src = R"(
+Builtins = struct @align(16) {
+  position:vec4<f32> @offset(0), @builtin(position)
+  point_size:f32 @offset(16), @builtin(__point_size)
+}
+
+$B1: {  # root
+  %builtins:ptr<__out, Builtins, read_write> = var undef
+}
+
+%foo = @vertex func():void {
+  $B2: {
+    %3:ptr<__out, vec4<f32>, read_write> = access %builtins, 0u
+    store %3, vec4<f32>(1.0f)
+    %4:ptr<__out, f32, read_write> = access %builtins, 1u
+    store %4, 2.0f
+    ret
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto result = ShaderIO(mod);
+    ASSERT_NE(result, Success);
+    EXPECT_EQ(result.Failure().reason, "store to point_size is not 1.0");
+}
+
 TEST_F(SpirvReader_ShaderIOTest, PointSize_Var) {
     auto* ps = b.Var("point_size", ty.ptr(core::AddressSpace::kOut, ty.f32()));
     ps->SetBuiltin(core::BuiltinValue::kPointSize);
@@ -3310,6 +3447,82 @@ $B1: {  # root
     Run(ShaderIO);
 
     EXPECT_EQ(expect, str());
+}
+
+TEST_F(SpirvReader_ShaderIOTest, PointSize_Var_StoreNotOne) {
+    auto* position = b.Var("position", ty.ptr(core::AddressSpace::kOut, ty.vec4<f32>()));
+    position->SetBuiltin(core::BuiltinValue::kPosition);
+    mod.root_block->Append(position);
+
+    auto* pointsize = b.Var("pointsize", ty.ptr(core::AddressSpace::kOut, ty.f32()));
+    pointsize->SetBuiltin(core::BuiltinValue::kPointSize);
+    mod.root_block->Append(pointsize);
+
+    auto* ep = b.Function("foo", ty.void_(), core::ir::Function::PipelineStage::kVertex);
+    b.Append(ep->Block(), [&] {  //
+        b.Store(position, b.Splat<vec4<f32>>(0_f));
+        b.Store(pointsize, 2_f);
+        b.Return(ep);
+    });
+
+    auto* src = R"(
+$B1: {  # root
+  %position:ptr<__out, vec4<f32>, read_write> = var undef @builtin(position)
+  %pointsize:ptr<__out, f32, read_write> = var undef @builtin(__point_size)
+}
+
+%foo = @vertex func():void {
+  $B2: {
+    store %position, vec4<f32>(0.0f)
+    store %pointsize, 2.0f
+    ret
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto result = ShaderIO(mod);
+    ASSERT_NE(result, Success);
+    EXPECT_EQ(result.Failure().reason, "store to point_size is not 1.0");
+}
+
+TEST_F(SpirvReader_ShaderIOTest, PointSize_Var_StoreNotOne_ViaLet) {
+    auto* position = b.Var("position", ty.ptr(core::AddressSpace::kOut, ty.vec4<f32>()));
+    position->SetBuiltin(core::BuiltinValue::kPosition);
+    mod.root_block->Append(position);
+
+    auto* pointsize = b.Var("pointsize", ty.ptr(core::AddressSpace::kOut, ty.f32()));
+    pointsize->SetBuiltin(core::BuiltinValue::kPointSize);
+    mod.root_block->Append(pointsize);
+
+    auto* ep = b.Function("foo", ty.void_(), core::ir::Function::PipelineStage::kVertex);
+    b.Append(ep->Block(), [&] {  //
+        b.Store(position, b.Splat<vec4<f32>>(0_f));
+        auto* ptr = b.Let(pointsize);
+        b.Store(ptr, 2_f);
+        b.Return(ep);
+    });
+
+    auto* src = R"(
+$B1: {  # root
+  %position:ptr<__out, vec4<f32>, read_write> = var undef @builtin(position)
+  %pointsize:ptr<__out, f32, read_write> = var undef @builtin(__point_size)
+}
+
+%foo = @vertex func():void {
+  $B2: {
+    store %position, vec4<f32>(0.0f)
+    %4:ptr<__out, f32, read_write> = let %pointsize
+    store %4, 2.0f
+    ret
+  }
+}
+)";
+    EXPECT_EQ(src, str());
+
+    auto result = ShaderIO(mod);
+    ASSERT_NE(result, Success);
+    EXPECT_EQ(result.Failure().reason, "store to point_size is not 1.0");
 }
 
 TEST_F(SpirvReader_ShaderIOTest, Outputs_Struct_UnusedOutputs) {

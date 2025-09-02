@@ -32,6 +32,7 @@
 #include <utility>
 
 #include "dawn/common/Constants.h"
+#include "dawn/common/GPUInfo.h"
 #include "dawn/native/ChainUtils.h"
 #include "dawn/native/Instance.h"
 #include "dawn/native/d3d/D3DError.h"
@@ -162,6 +163,8 @@ void PhysicalDevice::InitializeSupportedFeaturesImpl() {
     EnableFeature(Feature::DawnPartialLoadResolveTexture);
     EnableFeature(Feature::RG11B10UfloatRenderable);
     EnableFeature(Feature::TextureFormatsTier1);
+    EnableFeature(Feature::PrimitiveIndex);
+
     if (mDeviceInfo.isUMA && mDeviceInfo.supportsMapNoOverwriteDynamicBuffers) {
         // With UMA we should allow mapping usages on more type of buffers.
         EnableFeature(Feature::BufferMapExtendedUsages);
@@ -275,7 +278,7 @@ MaybeError PhysicalDevice::InitializeSupportedLimitsImpl(CombinedLimits* limits)
     // Max number of "constants" where each constant is a 16-byte float4
     limits->v1.maxUniformBufferBindingSize = D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16;
 
-    if (gpu_info::IsQualcomm_ACPI(GetVendorId())) {
+    if (gpu_info::IsQualcommACPI(GetVendorId())) {
         // limit of number of texels in a buffer == (1 << 27)
         // D3D11_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP
         // This limit doesn't apply to a raw buffer, but only applies to
@@ -293,7 +296,9 @@ MaybeError PhysicalDevice::InitializeSupportedLimitsImpl(CombinedLimits* limits)
     // See the discussions in https://github.com/gpuweb/gpuweb/issues/1962 for more details.
     limits->v1.maxInterStageShaderVariables = D3D11_PS_INPUT_REGISTER_COUNT - 2;
 
-    limits->v1.maxImmediateSize = kDefaultMaxImmediateDataBytes;
+    // D3D11 uses internal uniform buffers to support immediate data. The space is enough for
+    // 64 bytes.
+    limits->v1.maxImmediateSize = kMaxSupportedImmediateDataBytes;
 
     // The BlitTextureToBuffer helper requires the alignment to be 4.
     limits->texelCopyBufferRowAlignmentLimits.minTexelCopyBufferRowAlignment = 4;
@@ -335,7 +340,8 @@ void PhysicalDevice::SetupBackendDeviceToggles(dawn::platform::Platform* platfor
     // The workaround still can't cover lazy clear,
     // TODO(crbug.com/364834368): Move handling of workaround at command submission time instead of
     // recording time.
-    if (gpu_info::IsIntelGen11OrOlder(vendorId, deviceId)) {
+    if (gpu_info::IsIntel(vendorId) &&
+        gpu_info::GetIntelGen(vendorId, deviceId) <= gpu_info::IntelGen::Gen11) {
         deviceToggles->Default(Toggle::ClearColorWithDraw, true);
     }
 

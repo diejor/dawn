@@ -59,7 +59,8 @@ std::string BindingArray::FriendlyName() const {
     return out.str();
 }
 
-TypeAndCount BindingArray::Elements([[maybe_unused]] const Type*, [[maybe_unused]] uint32_t) const {
+TypeAndCount BindingArray::Elements([[maybe_unused]] const Type*,
+                                    [[maybe_unused]] uint32_t count_if_invalid) const {
     return {element_, count_->As<ConstantArrayCount>()->value};
 }
 
@@ -69,7 +70,8 @@ const Type* BindingArray::Element(uint32_t index) const {
 
 BindingArray* BindingArray::Clone(CloneContext& ctx) const {
     auto* elem_ty = element_->Clone(ctx);
-    return ctx.dst.mgr->Get<BindingArray>(elem_ty, count_);
+    auto* count = count_->Clone(ctx);
+    return ctx.dst.mgr->Get<BindingArray>(elem_ty, count);
 }
 
 }  // namespace tint::core::type

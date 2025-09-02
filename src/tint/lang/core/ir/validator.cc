@@ -66,6 +66,7 @@
 #include "src/tint/lang/core/ir/next_iteration.h"
 #include "src/tint/lang/core/ir/override.h"
 #include "src/tint/lang/core/ir/phony.h"
+#include "src/tint/lang/core/ir/referenced_functions.h"
 #include "src/tint/lang/core/ir/referenced_module_vars.h"
 #include "src/tint/lang/core/ir/return.h"
 #include "src/tint/lang/core/ir/store.h"
@@ -462,6 +463,26 @@ constexpr BuiltinChecker kWorkgroupIdChecker{
     /* type_error */ "workgroup_id must be an vec3<u32>",
 };
 
+constexpr BuiltinChecker kPrimitiveIndexChecker{
+    /* name */ "primitive_index",
+    /* stages */ EnumSet<Function::PipelineStage>(Function::PipelineStage::kFragment),
+    /* direction */ BuiltinChecker::IODirection::kInput,
+    /* type_check */
+    [](const core::type::Type* ty) -> bool { return ty->Is<core::type::U32>(); },
+    /* type_error */ "primitive_index must be an u32",
+};
+
+constexpr BuiltinChecker kBarycentricCoordChecker{
+    /* name */ "barycentric_coord",
+    /* stages */ EnumSet<Function::PipelineStage>(Function::PipelineStage::kFragment),
+    /* direction */ BuiltinChecker::IODirection::kInput,
+    /* type_check */
+    [](const core::type::Type* ty) -> bool {
+        return ty->IsFloatVector() && ty->Elements().count == 3;
+    },
+    /* type_error */ "barycentric_coord must be an vec3<f32>",
+};
+
 /// @returns an appropriate BuiltInCheck for @p builtin, ICEs when one isn't defined
 const BuiltinChecker& BuiltinCheckerFor(BuiltinValue builtin) {
     switch (builtin) {
@@ -495,6 +516,10 @@ const BuiltinChecker& BuiltinCheckerFor(BuiltinValue builtin) {
             return kVertexIndexChecker;
         case BuiltinValue::kWorkgroupId:
             return kWorkgroupIdChecker;
+        case BuiltinValue::kPrimitiveIndex:
+            return kPrimitiveIndexChecker;
+        case BuiltinValue::kBarycentricCoord:
+            return kBarycentricCoordChecker;
         case BuiltinValue::kPosition:
             TINT_ICE() << "BuiltinValue::kPosition requires special handling, so does not have a "
                           "checker defined";
@@ -749,6 +774,10 @@ class Validator {
     /// Also runs any validation that is not dependent on the entire module being
     /// sound and sets up data structures for later checks.
     void RunStructuralSoundnessChecks();
+
+    /// Checks that there is no direct or indirect recursion.
+    /// Depends on CheckStructuralSoundness() having previously been run.
+    void CheckForRecursion();
 
     /// Checks that there are no orphaned instructions
     /// Depends on CheckStructuralSoundness() having previously been run
@@ -1403,19 +1432,31 @@ Disassembler& Validator::Disassemble() {
 Result<SuccessType> Validator::Run() {
     RunStructuralSoundnessChecks();
 
-    if (!diagnostics_.ContainsErrors()) {
-        CheckForOrphanedInstructions();
-    }
-
-    if (!diagnostics_.ContainsErrors()) {
-        CheckForNonFragmentDiscards();
-    }
+    CheckForRecursion();
+    CheckForOrphanedInstructions();
+    CheckForNonFragmentDiscards();
 
     if (diagnostics_.ContainsErrors()) {
         diagnostics_.AddNote(Source{}) << "# Disassembly\n" << Disassemble().Text();
         return Failure{diagnostics_.Str()};
     }
     return Success;
+}
+
+void Validator::CheckForRecursion() {
+    if (diagnostics_.ContainsErrors()) {
+        return;
+    }
+
+    ReferencedFunctions<const Module> referenced_functions(mod_);
+    for (auto& func : mod_.functions) {
+        auto& refs = referenced_functions.TransitiveReferences(func);
+        if (refs.Contains(func)) {
+            // TODO(434684891): Consider improving this error with more information.
+            AddError(func) << "recursive function calls are not allowed";
+            return;
+        }
+    }
 }
 
 void Validator::CheckForOrphanedInstructions() {
@@ -1691,8 +1732,14 @@ bool Validator::CheckResults(const ir::Instruction* inst, std::optional<size_t> 
     }
 
     bool passed = true;
+    Hashset<const InstructionResult*, 4> seen_instruction_results;
     for (size_t i = 0; i < inst->Results().Length(); i++) {
         if (DAWN_UNLIKELY(!CheckResult(inst, i))) {
+            passed = false;
+        }
+
+        if (!seen_instruction_results.Add(inst->Result(i))) {
+            AddResultError(inst, i) << "result was seen previously as a result";
             passed = false;
         }
     }
@@ -1823,9 +1870,8 @@ void Validator::CheckType(const core::type::Type* root,
     }
 
     if (!capabilities_.Contains(Capability::kAllowNonCoreTypes)) {
-        // Check for core types (this is a hack to determine if the type is core, non-core types
-        // prefix their names with `lang.`, so we search for a `.` to find non-core)
-        if (root->FriendlyName().find(".") != std::string::npos) {
+        // Check for core types, which are the only types declared in the `tint::core` namespace.
+        if (!std::string_view(root->TypeInfo().name).starts_with("tint::core")) {
             diag() << "non-core types not allowed in core IR";
             return;
         }
@@ -1850,11 +1896,22 @@ void Validator::CheckType(const core::type::Type* root,
 
                 for (auto* member : str->Members()) {
                     if (member->RowMajor()) {
-                        diag() << "Row major annotation now allowed on structures";
+                        diag() << "Row major annotation not allowed on structures";
                         return false;
                     }
                     if (member->HasMatrixStride()) {
                         diag() << "Matrix stride annotation not allowed on structures";
+                        return false;
+                    }
+                    if (member->Size() < member->Type()->Size()) {
+                        diag() << "struct member " << member->Index()
+                               << " with size=" << member->Size()
+                               << " must be at least as large as the type with size "
+                               << member->Type()->Size();
+                        return false;
+                    }
+                    if (member->Type()->Is<core::type::Void>()) {
+                        diag() << "struct member " << member->Index() << " cannot have void type";
                         return false;
                     }
                 }
@@ -1977,7 +2034,6 @@ void Validator::CheckType(const core::type::Type* root,
 
                 switch (ms->Dim()) {
                     case core::type::TextureDimension::k2d:
-                    case core::type::TextureDimension::k2dArray:
                         break;
                     default:
                         diag() << "invalid multisampled texture dimension: "
@@ -3085,13 +3141,23 @@ void Validator::CheckConstruct(const Construct* construct) {
         return;
     }
 
+    auto* result_type = construct->Result()->Type();
+
+    if (!result_type->IsConstructible()) {
+        // We only allow `construct` to create non-constructible types when they are structures that
+        // contain pointers and handle types, with the corresponding capability enabled.
+        if (!(result_type->Is<core::type::Struct>() &&
+              capabilities_.Contains(Capability::kAllowPointersAndHandlesInStructures))) {
+            AddError(construct) << "type is not constructible";
+            return;
+        }
+    }
+
     auto args = construct->Args();
     if (args.IsEmpty()) {
         // Zero-value constructors are valid for all constructible types.
         return;
     }
-
-    auto* result_type = construct->Result()->Type();
 
     auto check_args_match_elements = [&] {
         // Check that type type of each argument matches the expected element type of the composite.
@@ -3109,11 +3175,34 @@ void Validator::CheckConstruct(const Construct* construct) {
     };
 
     if (result_type->Is<core::type::Scalar>()) {
-        // TODO(crbug.com/427964608): This needs special handling as Element() produces nullptr.
-    } else if (result_type->Is<core::type::Vector>()) {
-        // TODO(crbug.com/427964205): This needs special handling as there are many cases.
-    } else if (result_type->Is<core::type::Matrix>()) {
-        // TODO(crbug.com/427965903): This needs special handling as there are many cases.
+        // The only valid non-zero scalar constructor is the identity operation.
+        if (args.Length() > 1) {
+            AddError(construct) << "scalar construct must not have more than one argument";
+        }
+        if (args[0]->Type() != result_type) {
+            AddError(construct, 0u) << "scalar construct argument type " << NameOf(args[0]->Type())
+                                    << " does not match result type " << NameOf(result_type);
+        }
+    } else if (auto* vec = result_type->As<core::type::Vector>()) {
+        auto table = intrinsic::Table<intrinsic::Dialect>(type_mgr_, symbols_);
+        auto ctor_conv = intrinsic::VectorCtorConv(vec->Width());
+        auto arg_types = Transform<4>(args, [&](auto* v) { return v->Type(); });
+        auto match = table.Lookup(ctor_conv, Vector{vec->Type()}, std::move(arg_types),
+                                  core::EvaluationStage::kConstant);
+        if (match != Success) {
+            AddError(construct) << "no matching overload for " << vec->FriendlyName()
+                                << " constructor";
+        }
+    } else if (auto* mat = result_type->As<core::type::Matrix>()) {
+        auto table = intrinsic::Table<intrinsic::Dialect>(type_mgr_, symbols_);
+        auto ctor_conv = intrinsic::MatrixCtorConv(mat->Columns(), mat->Rows());
+        auto arg_types = Transform<8>(args, [&](auto* v) { return v->Type(); });
+        auto match = table.Lookup(ctor_conv, Vector{mat->Type()}, std::move(arg_types),
+                                  core::EvaluationStage::kConstant);
+        if (match != Success) {
+            AddError(construct) << "no matching overload for " << mat->FriendlyName()
+                                << " constructor";
+        }
     } else if (result_type->Is<core::type::Array>()) {
         check_args_match_elements();
     } else if (auto* str = As<core::type::Struct>(result_type)) {
@@ -3320,7 +3409,7 @@ void Validator::CheckAccess(const Access* a) {
 }
 
 void Validator::CheckBinary(const Binary* b) {
-    if (!CheckResultsAndOperandRange(b, Binary::kNumResults, Binary::kNumOperands)) {
+    if (!CheckResultsAndOperands(b, Binary::kNumResults, Binary::kNumOperands)) {
         return;
     }
 
@@ -3346,7 +3435,7 @@ void Validator::CheckBinary(const Binary* b) {
 }
 
 void Validator::CheckUnary(const Unary* u) {
-    if (!CheckResultsAndOperandRange(u, Unary::kNumResults, Unary::kNumOperands)) {
+    if (!CheckResultsAndOperands(u, Unary::kNumResults, Unary::kNumOperands)) {
         return;
     }
 
@@ -3391,6 +3480,7 @@ void Validator::CheckIf(const If* if_) {
 
 void Validator::CheckLoop(const Loop* l) {
     CheckResults(l);
+    CheckOperands(l, 0);
 
     // Note: Tasks are queued in reverse order of their execution
     tasks_.Push([this, l] {
@@ -3472,6 +3562,7 @@ void Validator::CheckLoopContinuing(const Loop* loop) {
 }
 
 void Validator::CheckSwitch(const Switch* s) {
+    CheckResults(s);
     CheckOperand(s, Switch::kConditionOperandOffset);
 
     if (s->Condition() && !s->Condition()->Type()->IsIntegerScalar()) {
@@ -3569,6 +3660,11 @@ void Validator::CheckTerminator(const Terminator* b) {
 }
 
 void Validator::CheckBreakIf(const BreakIf* b) {
+    if (b->Condition() == nullptr) {
+        AddError(b) << "break_if condition cannot be nullptr";
+        return;
+    }
+
     auto* loop = b->Loop();
     if (loop == nullptr) {
         AddError(b) << "has no associated loop";
@@ -3675,6 +3771,11 @@ void Validator::CheckReturn(const Return* ret) {
         return;
     }
 
+    if (func != ContainingFunction(ret)) {
+        AddError(ret) << "function operand does not match containing function";
+        return;
+    }
+
     if (func->ReturnType()->Is<core::type::Void>()) {
         if (ret->HasValue()) {
             AddError(ret) << "unexpected return value";
@@ -3767,6 +3868,13 @@ void Validator::CheckLoad(const Load* l) {
                 << "result type " << NameOf(l->Result()->Type())
                 << " does not match source store type " << NameOf(mv->StoreType());
         }
+
+        if (auto* arr = mv->StoreType()->As<core::type::Array>()) {
+            if (arr->Count()->Is<core::type::RuntimeArrayCount>()) {
+                AddError(l) << "cannot load a runtime-sized array";
+                return;
+            }
+        }
     }
 }
 
@@ -3797,6 +3905,12 @@ void Validator::CheckStore(const Store* s) {
                 AddError(s, Store::kFromOperandOffset)
                     << "value type " << NameOf(value_type) << " does not match store type "
                     << NameOf(store_type);
+                return;
+            }
+
+            if (!store_type->IsConstructible()) {
+                AddError(s) << "store type " << NameOf(store_type) << " is not constructible";
+                return;
             }
         }
     }
@@ -3817,6 +3931,11 @@ void Validator::CheckLoadVectorElement(const LoadVectorElement* l) {
             }
         }
     }
+
+    if (!l->Index()->Type()->IsIntegerScalar()) {
+        AddError(l, LoadVectorElement::kIndexOperandOffset)
+            << "load vector element index must be an integer scalar";
+    }
 }
 
 void Validator::CheckStoreVectorElement(const StoreVectorElement* s) {
@@ -3833,6 +3952,11 @@ void Validator::CheckStoreVectorElement(const StoreVectorElement* s) {
                     << " does not match vector pointer element type " << NameOf(el_ty);
             }
         }
+    }
+
+    if (!s->Index()->Type()->IsIntegerScalar()) {
+        AddError(s, StoreVectorElement::kIndexOperandOffset)
+            << "store vector element index must be an integer scalar";
     }
 }
 

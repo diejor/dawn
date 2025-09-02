@@ -276,6 +276,10 @@ source_set("sources") {
     "CreatePipelineAsyncEvent.h",
     "Device.cpp",
     "Device.h",
+    "DeviceGuard.cpp",
+    "DeviceGuard.h",
+    "DynamicArrayState.cpp",
+    "DynamicArrayState.h",
     "DynamicUploader.cpp",
     "DynamicUploader.h",
     "EncodingContext.cpp",
@@ -391,6 +395,8 @@ source_set("sources") {
     "SystemEvent.h",
     "SystemHandle.cpp",
     "SystemHandle.h",
+    "TexelBufferView.cpp",
+    "TexelBufferView.h",
     "Texture.cpp",
     "Texture.h",
     "TintUtils.cpp",
@@ -438,6 +444,7 @@ source_set("sources") {
   # In UWP, all available APIs are defined in WindowsApp.lib
   if (is_win && !dawn_is_winuwp) {
     libs += [
+      "onecore.lib",
       "user32.lib",
       "delayimp.lib",
     ]
@@ -718,10 +725,13 @@ source_set("sources") {
       "webgpu/DeviceWGPU.cpp",
       "webgpu/DeviceWGPU.h",
       "webgpu/Forward.h",
+      "webgpu/ObjectWGPU.h",
       "webgpu/PhysicalDeviceWGPU.cpp",
       "webgpu/PhysicalDeviceWGPU.h",
       "webgpu/QueueWGPU.cpp",
       "webgpu/QueueWGPU.h",
+      "webgpu/TextureWGPU.cpp",
+      "webgpu/TextureWGPU.h",
       "webgpu/WebGPUError.h",
     ]
   }
@@ -752,7 +762,6 @@ source_set("sources") {
       "opengl/BindGroupGL.h",
       "opengl/BindGroupLayoutGL.cpp",
       "opengl/BindGroupLayoutGL.h",
-      "opengl/BindingPoint.h",
       "opengl/BufferGL.cpp",
       "opengl/BufferGL.h",
       "opengl/CommandBufferGL.cpp",
@@ -770,6 +779,7 @@ source_set("sources") {
       "opengl/Forward.h",
       "opengl/GLFormat.cpp",
       "opengl/GLFormat.h",
+      "opengl/IntegerTypes.h",
       "opengl/OpenGLFunctions.cpp",
       "opengl/OpenGLFunctions.h",
       "opengl/OpenGLVersion.cpp",
@@ -840,6 +850,8 @@ source_set("sources") {
       "vulkan/FencedDeleter.cpp",
       "vulkan/FencedDeleter.h",
       "vulkan/Forward.h",
+      "vulkan/FramebufferCache.cpp",
+      "vulkan/FramebufferCache.h",
       "vulkan/PhysicalDeviceVk.cpp",
       "vulkan/PhysicalDeviceVk.h",
       "vulkan/PipelineCacheVk.cpp",

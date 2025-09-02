@@ -363,6 +363,27 @@ TEST_F(IR_ValidatorTest, Loop_NullResult) {
 )")) << res.Failure();
 }
 
+TEST_F(IR_ValidatorTest, Loop_TooManyOperands) {
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        loop->SetOperands(Vector{b.Value(42_i)});
+        b.Append(loop->Body(), [&] {  //
+            b.Return(f);
+        });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_THAT(res.Failure().reason,
+                testing::HasSubstr(R"(:3:5 error: loop: expected exactly 0 operands, got 1
+    loop [b: $B2] {  # loop_1
+    ^^^^^^^^^^^^^
+)")) << res.Failure();
+}
+
 TEST_F(IR_ValidatorTest, Switch_RootBlock) {
     auto* switch_ = b.Switch(1_i);
     auto* def = b.DefaultCase(switch_);
@@ -1251,6 +1272,25 @@ TEST_F(IR_ValidatorTest, ContinuingUseValueAfterContinue) {
 )")) << res.Failure();
 }
 
+TEST_F(IR_ValidatorTest, BreakIf_UndefCondition) {
+    auto* f = b.Function("my_func", ty.void_());
+    b.Append(f->Block(), [&] {
+        auto* loop = b.Loop();
+        b.Append(loop->Body(), [&] { b.Continue(loop); });
+        b.Append(loop->Continuing(), [&] { b.BreakIf(loop, nullptr); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_THAT(res.Failure().reason,
+                testing::HasSubstr(
+                    R"(:8:9 error: break_if: break_if condition cannot be nullptr
+        break_if undef  # -> [t: exit_loop loop_1, f: $B2]
+        ^^^^^^^^^^^^^^
+)")) << res.Failure();
+}
+
 TEST_F(IR_ValidatorTest, BreakIf_NextIterUnexpectedValues) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {
@@ -1871,6 +1911,27 @@ TEST_F(IR_ValidatorTest, Return_MissingFunction) {
 )")) << res.Failure();
 }
 
+TEST_F(IR_ValidatorTest, Return_WrongFunction) {
+    auto* f = b.Function("f", ty.void_());
+    b.Append(f->Block(), [&] {  //
+        b.Return(f);
+    });
+
+    auto* g = b.Function("g", ty.void_());
+    b.Append(g->Block(), [&] {  //
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_THAT(res.Failure().reason,
+                testing::HasSubstr(
+                    R"(:8:5 error: return: function operand does not match containing function
+    ret
+    ^^^
+)")) << res.Failure();
+}
+
 TEST_F(IR_ValidatorTest, Return_UnexpectedValue) {
     auto* f = b.Function("my_func", ty.void_());
     b.Append(f->Block(), [&] {  //
@@ -2091,6 +2152,25 @@ TEST_F(IR_ValidatorTest, Switch_NoCondition) {
     auto res = ir::Validate(mod);
     ASSERT_NE(res, Success);
     EXPECT_THAT(res.Failure().reason, testing::HasSubstr(R"(error: switch: operand is undefined
+)")) << res.Failure();
+}
+
+TEST_F(IR_ValidatorTest, Switch_NullResult) {
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        auto* s = b.Switch(1_u);
+        s->SetResults(Vector<InstructionResult*, 1>{nullptr});
+
+        b.Append(b.DefaultCase(s), [&] { b.Return(f); });
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_THAT(res.Failure().reason, testing::HasSubstr(R"(error: switch: result is undefined
+    undef = switch 1u [c: (default, $B2)] {  # switch_1
+    ^^^^^
 )")) << res.Failure();
 }
 

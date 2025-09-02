@@ -614,6 +614,27 @@ TEST_F(IR_ValidatorTest, Load_NonReadableSource) {
 )")) << res.Failure();
 }
 
+TEST_F(IR_ValidatorTest, Load_RuntimeSizedArray) {
+    auto* a = b.Var("a", ty.ptr<storage, array<u32>, read_write>());
+    a->SetBindingPoint(0, 0);
+    mod.root_block->Append(a);
+
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        b.Load(a);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_THAT(res.Failure().reason, testing::HasSubstr(
+                                          R"(:7:21 error: load: cannot load a runtime-sized array
+    %3:array<u32> = load %a
+                    ^^^^
+)")) << res.Failure();
+}
+
 TEST_F(IR_ValidatorTest, Store_NullTo) {
     auto* f = b.Function("my_func", ty.void_());
 
@@ -765,6 +786,30 @@ TEST_F(IR_ValidatorTest, Store_NonWriteableTarget) {
 )")) << res.Failure();
 }
 
+TEST_F(IR_ValidatorTest, Store_NonConstructible) {
+    auto* a = b.Var("a", ty.ptr<storage, array<u32>, read_write>());
+    a->SetBindingPoint(0, 0);
+    mod.root_block->Append(a);
+
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        // Note: The load is invalid too, but there's no way to produce a non-constructible value
+        // that will not hit another validation rule before the constructible check.
+        b.Store(a, b.Load(a));
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_THAT(res.Failure().reason,
+                testing::HasSubstr(
+                    R"(:8:5 error: store: store type 'array<u32>' is not constructible
+    store %a, %3
+    ^^^^^
+)")) << res.Failure();
+}
+
 TEST_F(IR_ValidatorTest, LoadVectorElement_NullResult) {
     auto* f = b.Function("my_func", ty.void_());
 
@@ -861,6 +906,26 @@ TEST_F(IR_ValidatorTest, LoadVectorElement_MissingOperands) {
 )")) << res.Failure();
 }
 
+TEST_F(IR_ValidatorTest, LoadVectorElement_InvalidIndexType) {
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        auto* var = b.Var(ty.ptr<function, vec3<f32>>());
+        b.LoadVectorElement(var->Result(), 1_f);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_THAT(
+        res.Failure().reason,
+        testing::HasSubstr(
+            R"(:4:38 error: load_vector_element: load vector element index must be an integer scalar
+    %3:f32 = load_vector_element %2, 1.0f
+                                     ^^^^
+)")) << res.Failure();
+}
+
 TEST_F(IR_ValidatorTest, StoreVectorElement_NullTo) {
     auto* f = b.Function("my_func", ty.void_());
 
@@ -954,6 +1019,26 @@ TEST_F(IR_ValidatorTest, StoreVectorElement_UnexpectedResult) {
         testing::HasSubstr(R"(:4:5 error: store_vector_element: expected exactly 0 results, got 1
     store_vector_element %2, 1i, 2.0f
     ^^^^^^^^^^^^^^^^^^^^
+)")) << res.Failure();
+}
+
+TEST_F(IR_ValidatorTest, StoreVectorElement_InvalidIndexType) {
+    auto* f = b.Function("my_func", ty.void_());
+
+    b.Append(f->Block(), [&] {
+        auto* var = b.Var(ty.ptr<function, vec3<f32>>());
+        b.StoreVectorElement(var->Result(), 1_f, 1_f);
+        b.Return(f);
+    });
+
+    auto res = ir::Validate(mod);
+    ASSERT_NE(res, Success);
+    EXPECT_THAT(
+        res.Failure().reason,
+        testing::HasSubstr(
+            R"(:4:30 error: store_vector_element: store vector element index must be an integer scalar
+    store_vector_element %2, 1.0f, 1.0f
+                             ^^^^
 )")) << res.Failure();
 }
 
